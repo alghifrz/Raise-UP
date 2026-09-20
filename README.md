@@ -34,7 +34,7 @@ backend/
     └── generated/
 ```
 
-### Frontend (Phase 12A)
+### Frontend 
 
 ```text
 frontend/
