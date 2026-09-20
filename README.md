@@ -98,7 +98,7 @@ Optional:
 | `WHATSAPP_VERIFY_TOKEN` | Shared secret for webhook verification challenge |
 | `WHATSAPP_APP_SECRET` | Meta App Secret (validates `X-Hub-Signature-256`) |
 
-## Frontend (Phase 12A)
+## Frontend
 
 Admin UI for authentication and the dashboard summary.
 
