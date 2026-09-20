@@ -1,0 +1,1 @@
+-- No-op down migration for the initial bootstrap.

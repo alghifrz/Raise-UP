@@ -1,0 +1,2 @@
+-- Infrastructure bootstrap.
+-- Domain tables will be introduced in later migrations after schema redesign.

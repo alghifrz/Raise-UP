@@ -1,0 +1,98 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+
+  /* Admin + shared UI — synced with landing palette */
+  --color-surface: #e8f6f7;
+  --color-panel: #ffffff;
+  --color-ink: #0f2527;
+  --color-muted: #4a6568;
+  --color-line: #cfe7e9;
+  --color-accent: #0d3b3f;
+  --color-accent-hover: #1c5b62;
+  --color-accent-soft: #dff1f3;
+  --color-secondary: #d2f843;
+  --color-secondary-dim: #b8de2a;
+  --color-secondary-ink: #0f2527;
+  --color-tertiary: #1c5b62;
+  --color-danger: #ba1a1a;
+  --color-danger-soft: #ffdad6;
+}
+
+@layer base {
+  html {
+    @apply h-full scroll-smooth;
+  }
+
+  body {
+    @apply m-0 min-h-full bg-[var(--color-surface)] font-sans text-[var(--color-ink)] antialiased;
+  }
+
+  #root {
+    @apply min-h-full;
+  }
+
+  *:focus-visible {
+    @apply outline-2 outline-offset-2 outline-[var(--color-tertiary)];
+  }
+}
+
+/*
+  Landing palette
+  Primary   #0D3B3F
+  Secondary #D2F843
+  Tertiary  #1C5B62
+  Neutral   #0F2527
+*/
+.landing-root {
+  --lp-surface: #e8f6f7;
+  --lp-surface-low: #dff1f3;
+  --lp-surface-high: #cfe7e9;
+  --lp-surface-highest: #b8d8db;
+  --lp-white: #ffffff;
+  --lp-ink: #0f2527;
+  --lp-muted: #4a6568;
+  --lp-primary: #0d3b3f;
+  --lp-primary-container: #0d3b3f;
+  --lp-on-primary: #e8f6f7;
+  --lp-on-primary-muted: #7ba5aa;
+  --lp-secondary: #d2f843;
+  --lp-secondary-dim: #b8de2a;
+  --lp-on-secondary: #0f2527;
+  --lp-tertiary: #1c5b62;
+  --lp-tertiary-light: #2a7a84;
+  --lp-gold: var(--lp-secondary);
+  --lp-gold-dim: var(--lp-secondary-dim);
+  --lp-on-gold: var(--lp-on-secondary);
+  --lp-green: var(--lp-tertiary);
+  --lp-green-light: var(--lp-tertiary-light);
+  --lp-radius: 1.5rem;
+  --lp-radius-lg: 1.75rem;
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  background: var(--lp-surface);
+  color: var(--lp-ink);
+}
+
+.landing-root a {
+  text-decoration: none;
+  color: inherit;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}

@@ -1,0 +1,42 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test / coverage
+*.test
+*.out
+coverage.html
+
+# Go workspace
+vendor/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+postgres_data/
+
+# Logs
+*.log
+
+# Temporary
+tmp/
+temp/
