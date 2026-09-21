@@ -1,0 +1,103 @@
+name: Test and deploy
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Test backend
+        working-directory: backend
+        run: go test ./...
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: https://api.lebakasri.space
+        run: npm run build
+
+      - name: Validate production Compose file
+        env:
+          ENV_FILE: .env.production.example
+        run: docker compose --env-file .env.production.example -f docker-compose.production.yml config --quiet
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy on VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh "$VPS_USER@$VPS_HOST" 'bash -se' <<'DEPLOY'
+            set -euo pipefail
+            cd /opt/raiseup
+            git fetch origin master
+            git checkout master
+            git pull --ff-only origin master
+            docker compose --env-file .env.production -f docker-compose.production.yml build api frontend
+            docker compose --env-file .env.production -f docker-compose.production.yml up -d --remove-orphans
+            docker image prune -f
+            docker compose --env-file .env.production -f docker-compose.production.yml ps
+          DEPLOY
+
+      - name: Verify production
+        run: |
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error https://api.lebakasri.space/health >/dev/null \
+              && curl --fail --silent --show-error https://lebakasri.space/ >/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Production health check failed" >&2
+          exit 1
