@@ -35,6 +35,7 @@ export type ChatMessage = {
   body: string
   wa_message_id: string | null
   wa_status: string | null
+  is_read: boolean
   created_at: string
 }
 

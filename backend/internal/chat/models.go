@@ -91,6 +91,7 @@ type Message struct {
 	Body           string                `json:"body"`
 	WaMessageID    *string               `json:"wa_message_id"`
 	WaStatus       *string               `json:"wa_status"`
+	IsRead         bool                  `json:"is_read"`
 	CreatedAt      string                `json:"created_at"`
 }
 

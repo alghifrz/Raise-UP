@@ -163,6 +163,25 @@ type memoryResidents struct {
 	byID map[string]db.Resident
 }
 
+type sentMessage struct {
+	to   string
+	body string
+}
+
+type memoryMessenger struct {
+	enabled bool
+	sent    []sentMessage
+}
+
+func (m *memoryMessenger) Enabled() bool {
+	return m.enabled
+}
+
+func (m *memoryMessenger) SendText(_ context.Context, to, body string) (string, error) {
+	m.sent = append(m.sent, sentMessage{to: to, body: body})
+	return uuid.NewString(), nil
+}
+
 func newMemoryResidents() *memoryResidents {
 	return &memoryResidents{byID: make(map[string]db.Resident)}
 }
@@ -241,10 +260,8 @@ func TestCreateValidationErrors(t *testing.T) {
 	}{
 		{"missing title", announcement.CreateRequest{Body: "b", Category: "c", Visibility: "PUBLIC"}, announcement.ErrInvalidRequest},
 		{"missing body", announcement.CreateRequest{Title: "t", Category: "c", Visibility: "PUBLIC"}, announcement.ErrInvalidRequest},
-		{"missing category", announcement.CreateRequest{Title: "t", Body: "b", Visibility: "PUBLIC"}, announcement.ErrInvalidRequest},
 		{"invalid visibility", announcement.CreateRequest{Title: "t", Body: "b", Category: "c", Visibility: "HIDDEN"}, announcement.ErrInvalidRequest},
 		{"private without recipients", announcement.CreateRequest{Title: "t", Body: "b", Category: "c", Visibility: "PRIVATE"}, announcement.ErrRecipientRequired},
-		{"public with recipients", announcement.CreateRequest{Title: "t", Body: "b", Category: "c", Visibility: "PUBLIC", RecipientIDs: []string{uuid.NewString()}}, announcement.ErrInvalidRequest},
 		{"invalid recipient uuid", announcement.CreateRequest{Title: "t", Body: "b", Category: "c", Visibility: "PRIVATE", RecipientIDs: []string{"bad"}}, announcement.ErrInvalidRequest},
 		{"missing recipient", announcement.CreateRequest{Title: "t", Body: "b", Category: "c", Visibility: "PRIVATE", RecipientIDs: []string{uuid.NewString()}}, announcement.ErrResidentNotFound},
 		{"duplicate recipients", announcement.CreateRequest{Title: "t", Body: "b", Category: "c", Visibility: "PRIVATE", RecipientIDs: []string{residents.add(), ""}}, announcement.ErrInvalidRequest},
@@ -265,6 +282,21 @@ func TestCreateValidationErrors(t *testing.T) {
 				t.Fatalf("error = %v, want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestCreateDefaultsCategoryWhenOmitted(t *testing.T) {
+	service := announcement.NewService(newMemoryStore(), newMemoryResidents())
+	got, err := service.Create(context.Background(), authorID(), announcement.CreateRequest{
+		Title:      "Info warga",
+		Body:       "Isi pengumuman",
+		Visibility: "PUBLIC",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if got.Category != "UMUM" {
+		t.Fatalf("Category = %q, want UMUM", got.Category)
 	}
 }
 
@@ -321,17 +353,20 @@ func TestUpdateVisibilityAndRecipients(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PRIVATE→PUBLIC error = %v", err)
 	}
-	if toPublic.Visibility != db.AnnouncementVisibilityPUBLIC || len(toPublic.RecipientIDs) != 0 {
-		t.Fatalf("expected cleared recipients: %+v", toPublic)
+	if toPublic.Visibility != db.AnnouncementVisibilityPUBLIC || !containsAll(toPublic.RecipientIDs, r1, r3) {
+		t.Fatalf("visibility should not alter recipients: %+v", toPublic)
 	}
-	if len(store.recipients[created.ID]) != 0 {
-		t.Fatalf("store still has recipients: %v", store.recipients[created.ID])
+	if !containsAll(store.recipients[created.ID], r1, r3) {
+		t.Fatalf("store recipients changed with visibility: %v", store.recipients[created.ID])
 	}
 
 	visPrivate := "PRIVATE"
-	_, err = service.Update(context.Background(), created.ID, announcement.UpdateRequest{Visibility: &visPrivate})
-	if !errors.Is(err, announcement.ErrRecipientRequired) {
-		t.Fatalf("PUBLIC→PRIVATE without recipients error = %v", err)
+	backToPrivate, err := service.Update(context.Background(), created.ID, announcement.UpdateRequest{Visibility: &visPrivate})
+	if err != nil {
+		t.Fatalf("PUBLIC→PRIVATE with existing recipients error = %v", err)
+	}
+	if !containsAll(backToPrivate.RecipientIDs, r1, r3) {
+		t.Fatalf("existing recipients were not preserved: %+v", backToPrivate)
 	}
 
 	newRecipients := []string{r2}
@@ -347,7 +382,7 @@ func TestUpdateVisibilityAndRecipients(t *testing.T) {
 	}
 }
 
-func TestUpdatePublicCannotHaveRecipients(t *testing.T) {
+func TestUpdatePublicCanHaveRecipients(t *testing.T) {
 	residents := newMemoryResidents()
 	r1 := residents.add()
 	service := announcement.NewService(newMemoryStore(), residents)
@@ -355,9 +390,12 @@ func TestUpdatePublicCannotHaveRecipients(t *testing.T) {
 		Title: "t", Body: "b", Category: "c", Visibility: "PUBLIC",
 	})
 	ids := []string{r1}
-	_, err := service.Update(context.Background(), created.ID, announcement.UpdateRequest{RecipientIDs: &ids})
-	if !errors.Is(err, announcement.ErrInvalidRequest) {
-		t.Fatalf("error = %v, want ErrInvalidRequest", err)
+	updated, err := service.Update(context.Background(), created.ID, announcement.UpdateRequest{RecipientIDs: &ids})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if !containsAll(updated.RecipientIDs, r1) {
+		t.Fatalf("public recipients = %v", updated.RecipientIDs)
 	}
 }
 
@@ -385,6 +423,41 @@ func TestStatusPublish(t *testing.T) {
 	_, err = service.UpdateStatus(context.Background(), created.ID, "PUBLISHED")
 	if !errors.Is(err, announcement.ErrInvalidStatusTransition) {
 		t.Fatalf("republish error = %v", err)
+	}
+}
+
+func TestPublishSendsWhatsAppToRecipients(t *testing.T) {
+	store := newMemoryStore()
+	residents := newMemoryResidents()
+	r1, r2 := residents.add(), residents.add()
+	messenger := &memoryMessenger{enabled: true}
+	service := announcement.NewService(store, residents)
+	service.SetMessenger(messenger)
+
+	created, err := service.Create(context.Background(), authorID(), announcement.CreateRequest{
+		Title:        "Kerja Bakti",
+		Body:         "Hari Minggu pukul 07.00.",
+		Visibility:   "PRIVATE",
+		RecipientIDs: []string{r1, r2},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	published, err := service.UpdateStatus(context.Background(), created.ID, "PUBLISHED")
+	if err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+	if published.Delivery == nil || published.Delivery.Sent != 2 || published.Delivery.Failed != 0 {
+		t.Fatalf("delivery = %+v", published.Delivery)
+	}
+	if len(messenger.sent) != 2 {
+		t.Fatalf("sent messages = %d, want 2", len(messenger.sent))
+	}
+	for _, message := range messenger.sent {
+		if !strings.Contains(message.body, "Kerja Bakti") || !strings.Contains(message.body, "Hari Minggu") {
+			t.Fatalf("unexpected WhatsApp body: %q", message.body)
+		}
 	}
 }
 

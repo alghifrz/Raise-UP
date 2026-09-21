@@ -50,7 +50,14 @@ async function rawRequest(path: string, options: RequestOptions = {}): Promise<{
     Accept: 'application/json',
   })
 
-  if (options.body !== undefined) {
+  const isFormData = options.body instanceof FormData
+  const requestBody: BodyInit | undefined =
+    options.body === undefined
+      ? undefined
+      : options.body instanceof FormData
+        ? options.body
+        : JSON.stringify(options.body)
+  if (options.body !== undefined && !isFormData) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -66,7 +73,7 @@ async function rawRequest(path: string, options: RequestOptions = {}): Promise<{
     response = await fetch(`${baseUrl}${path}`, {
       method: options.method ?? 'GET',
       headers,
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      body: requestBody,
       signal: options.signal,
     })
   } catch {

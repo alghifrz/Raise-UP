@@ -4,10 +4,12 @@ import { cn } from '../../lib/utils'
 type InputProps = InputHTMLAttributes<HTMLInputElement> & {
   label: string
   error?: string
+  hint?: string
 }
 
-export function Input({ id, label, error, className, ...props }: InputProps) {
+export function Input({ id, label, error, hint, className, ...props }: InputProps) {
   const inputId = id ?? props.name
+  const descriptionId = inputId ? `${inputId}-${error ? 'error' : 'hint'}` : undefined
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -31,12 +33,16 @@ export function Input({ id, label, error, className, ...props }: InputProps) {
           className,
         )}
         aria-invalid={error ? true : undefined}
-        aria-describedby={error && inputId ? `${inputId}-error` : undefined}
+        aria-describedby={error || hint ? descriptionId : undefined}
         {...props}
       />
       {error ? (
-        <p id={inputId ? `${inputId}-error` : undefined} className="text-sm text-[var(--color-danger)]">
+        <p id={descriptionId} className="text-sm text-[var(--color-danger)]">
           {error}
+        </p>
+      ) : hint ? (
+        <p id={descriptionId} className="text-xs text-[var(--color-muted)]">
+          {hint}
         </p>
       ) : null}
     </div>

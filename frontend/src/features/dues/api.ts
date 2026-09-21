@@ -7,6 +7,7 @@ import type {
   DuesPeriod,
   DuesPeriodFilters,
   DuesPeriodListResponse,
+  DuesReminderResult,
   DuesPeriodStatusFilters,
   DuesPeriodSummary,
   DuesStatusListResponse,
@@ -67,6 +68,12 @@ export function fetchDuesPeriodSummary(
   signal?: AbortSignal,
 ): Promise<DuesPeriodSummary> {
   return apiRequest<DuesPeriodSummary>(`/api/v1/dues/periods/${id}/summary`, { signal })
+}
+
+export function sendUnpaidDuesReminders(id: string): Promise<DuesReminderResult> {
+  return apiRequest<DuesReminderResult>(`/api/v1/dues/periods/${id}/remind-unpaid`, {
+    method: 'POST',
+  })
 }
 
 export function listDuesPeriodStatus(

@@ -31,16 +31,25 @@ export function getGalleryItem(id: string, signal?: AbortSignal): Promise<Galler
 }
 
 export function createGalleryItem(payload: CreateGalleryRequest): Promise<GalleryItem> {
-  return apiRequest<GalleryItem>('/api/v1/gallery', {
+  return apiRequest<GalleryItem>('/api/v1/gallery/upload', {
     method: 'POST',
-    body: payload,
+    body: toGalleryFormData(payload.image, payload.caption, payload.sort_order),
   })
 }
 
 export function updateGalleryItem(id: string, payload: UpdateGalleryRequest): Promise<GalleryItem> {
+  if (payload.image) {
+    return apiRequest<GalleryItem>(`/api/v1/gallery/${id}/image`, {
+      method: 'PUT',
+      body: toGalleryFormData(payload.image, payload.caption, payload.sort_order),
+    })
+  }
   return apiRequest<GalleryItem>(`/api/v1/gallery/${id}`, {
     method: 'PATCH',
-    body: payload,
+    body: {
+      caption: payload.caption,
+      sort_order: payload.sort_order,
+    },
   })
 }
 
@@ -48,4 +57,20 @@ export function deleteGalleryItem(id: string): Promise<void> {
   return apiRequest<void>(`/api/v1/gallery/${id}`, {
     method: 'DELETE',
   })
+}
+
+function toGalleryFormData(
+  image: File,
+  caption?: string,
+  sortOrder?: number,
+): FormData {
+  const form = new FormData()
+  form.set('image', image)
+  if (caption !== undefined) {
+    form.set('caption', caption)
+  }
+  if (sortOrder !== undefined) {
+    form.set('sort_order', String(sortOrder))
+  }
+  return form
 }

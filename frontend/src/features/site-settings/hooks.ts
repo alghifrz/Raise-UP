@@ -3,6 +3,7 @@ import { getSiteSettings, updateSiteSettings } from './api'
 import type { UpdateSiteSettingsRequest } from './types'
 
 export const siteSettingsQueryKey = ['site-settings'] as const
+export const publicSiteSettingsQueryKey = ['public', 'site-settings'] as const
 
 export function useSiteSettings() {
   return useQuery({
@@ -16,8 +17,13 @@ export function useUpdateSiteSettings() {
 
   return useMutation({
     mutationFn: (payload: UpdateSiteSettingsRequest) => updateSiteSettings(payload),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: siteSettingsQueryKey })
+    onSuccess: async (updated) => {
+      // Keep the public landing page in sync immediately after an admin update.
+      queryClient.setQueryData(publicSiteSettingsQueryKey, updated)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: siteSettingsQueryKey }),
+        queryClient.invalidateQueries({ queryKey: publicSiteSettingsQueryKey }),
+      ])
     },
   })
 }

@@ -10,4 +10,5 @@ var (
 	ErrPaymentAlreadyExists = errors.New("dues payment already exists")
 	ErrInvalidPaymentAmount = errors.New("invalid payment amount")
 	ErrResidentNotFound     = errors.New("resident not found")
+	ErrReminderUnavailable  = errors.New("WhatsApp reminder service unavailable")
 )

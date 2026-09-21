@@ -3,6 +3,7 @@ package gallery_test
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,39 @@ import (
 
 type memoryStore struct {
 	byID map[string]db.GalleryItem
+}
+
+type memoryObjectStorage struct {
+	uploaded []string
+	deleted  []string
+}
+
+type failingCreateStore struct {
+	*memoryStore
+}
+
+func (f *failingCreateStore) Create(
+	_ context.Context,
+	_ db.CreateGalleryItemParams,
+) (db.GalleryItem, error) {
+	return db.GalleryItem{}, errors.New("database unavailable")
+}
+
+func (m *memoryObjectStorage) Upload(
+	_ context.Context,
+	bucket, objectPath, _ string,
+	body io.Reader,
+) (string, error) {
+	if _, err := io.ReadAll(body); err != nil {
+		return "", err
+	}
+	m.uploaded = append(m.uploaded, objectPath)
+	return "https://example.supabase.co/storage/v1/object/public/" + bucket + "/" + objectPath, nil
+}
+
+func (m *memoryObjectStorage) Delete(_ context.Context, _, objectPath string) error {
+	m.deleted = append(m.deleted, objectPath)
+	return nil
 }
 
 func newMemoryStore() *memoryStore {
@@ -193,5 +227,86 @@ func TestGetListUpdateDelete(t *testing.T) {
 	err = svc.Delete(context.Background(), uuid.NewString())
 	if !errors.Is(err, gallery.ErrNotFound) {
 		t.Fatalf("expected missing delete, got %v", err)
+	}
+}
+
+func TestUploadReplaceAndDeleteManagedImage(t *testing.T) {
+	store := newMemoryStore()
+	objects := &memoryObjectStorage{}
+	svc := gallery.NewService(store)
+	svc.SetObjectStorage(objects, "gallery")
+	order := int32(2)
+
+	item, err := svc.CreateUploaded(context.Background(), gallery.UploadRequest{
+		Data:      []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"),
+		Caption:   " Dokumentasi ",
+		SortOrder: &order,
+	})
+	if err != nil {
+		t.Fatalf("create uploaded: %v", err)
+	}
+	if item.StoragePath == "" || !strings.HasSuffix(item.StoragePath, ".png") {
+		t.Fatalf("unexpected storage path: %q", item.StoragePath)
+	}
+	oldPath := item.StoragePath
+
+	replaced, err := svc.ReplaceImage(context.Background(), item.ID, gallery.ReplaceImageRequest{
+		UploadRequest: gallery.UploadRequest{
+			Data:    []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00"),
+			Caption: "Baru",
+		},
+		UpdateCaption: true,
+	})
+	if err != nil {
+		t.Fatalf("replace image: %v", err)
+	}
+	if replaced.StoragePath == oldPath || replaced.Caption != "Baru" {
+		t.Fatalf("unexpected replacement: %+v", replaced)
+	}
+	if len(objects.deleted) != 1 || objects.deleted[0] != oldPath {
+		t.Fatalf("old object not deleted: %+v", objects.deleted)
+	}
+
+	if err := svc.Delete(context.Background(), item.ID); err != nil {
+		t.Fatalf("delete managed item: %v", err)
+	}
+	if len(objects.deleted) != 2 || objects.deleted[1] != replaced.StoragePath {
+		t.Fatalf("replacement object not deleted: %+v", objects.deleted)
+	}
+}
+
+func TestUploadValidationAndUnavailableStorage(t *testing.T) {
+	svc := gallery.NewService(newMemoryStore())
+	_, err := svc.CreateUploaded(context.Background(), gallery.UploadRequest{
+		Data: []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"),
+	})
+	if !errors.Is(err, gallery.ErrStorageUnavailable) {
+		t.Fatalf("expected unavailable storage, got %v", err)
+	}
+
+	objects := &memoryObjectStorage{}
+	svc.SetObjectStorage(objects, "gallery")
+	_, err = svc.CreateUploaded(context.Background(), gallery.UploadRequest{
+		Data: []byte("not an image"),
+	})
+	if !errors.Is(err, gallery.ErrInvalidRequest) {
+		t.Fatalf("expected invalid image, got %v", err)
+	}
+}
+
+func TestUploadDeletesObjectWhenDatabaseCreateFails(t *testing.T) {
+	objects := &memoryObjectStorage{}
+	svc := gallery.NewService(&failingCreateStore{memoryStore: newMemoryStore()})
+	svc.SetObjectStorage(objects, "gallery")
+
+	_, err := svc.CreateUploaded(context.Background(), gallery.UploadRequest{
+		Data: []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"),
+	})
+	if err == nil {
+		t.Fatal("expected create failure")
+	}
+	if len(objects.uploaded) != 1 || len(objects.deleted) != 1 ||
+		objects.uploaded[0] != objects.deleted[0] {
+		t.Fatalf("uploaded object was not compensated: uploaded=%v deleted=%v", objects.uploaded, objects.deleted)
 	}
 }

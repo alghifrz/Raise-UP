@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/diuk/raiseup/config"
@@ -10,16 +11,23 @@ import (
 
 // Inbox is the chat-side ingest surface used by the webhook.
 type Inbox interface {
-	IngestWhatsAppInbound(ctx context.Context, phone, contactName, waMessageID, body string) error
+	IngestWhatsAppInbound(ctx context.Context, phone, contactName, waMessageID, body string) (bool, error)
 	ApplyWhatsAppStatus(ctx context.Context, waMessageID, status string) error
+}
+
+// AutoReplier handles public chatbot replies after a new inbound message is stored.
+type AutoReplier interface {
+	HandleInbound(ctx context.Context, phone, contactName, waMessageID, body string) error
 }
 
 // Service handles notifications and webhook processing.
 type Service struct {
-	cfg       configView
-	client    *Client
-	inbox     Inbox
-	enabled   bool
+	cfg     configView
+	client  *Client
+	inbox   Inbox
+	bot     AutoReplier
+	log     *slog.Logger
+	enabled bool
 }
 
 type configView struct {
@@ -28,10 +36,13 @@ type configView struct {
 }
 
 // NewService creates a WhatsApp application service.
-func NewService(cfg config.WhatsAppConfig, messenger *MessengerAdapter, inbox Inbox) *Service {
+func NewService(cfg config.WhatsAppConfig, messenger *MessengerAdapter, inbox Inbox, bot AutoReplier, log *slog.Logger) *Service {
 	var client *Client
 	if messenger != nil {
 		client = messenger.Client()
+	}
+	if log == nil {
+		log = slog.Default()
 	}
 	return &Service{
 		cfg: configView{
@@ -40,6 +51,8 @@ func NewService(cfg config.WhatsAppConfig, messenger *MessengerAdapter, inbox In
 		},
 		client:  client,
 		inbox:   inbox,
+		bot:     bot,
+		log:     log,
 		enabled: cfg.Enabled,
 	}
 }
@@ -148,8 +161,14 @@ func (s *Service) ProcessWebhookPayload(ctx context.Context, payload *WebhookPay
 					continue
 				}
 				name := contactsByWaID[msg.From]
-				if err := s.inbox.IngestWhatsAppInbound(ctx, msg.From, name, msg.ID, body); err != nil {
+				ingested, err := s.inbox.IngestWhatsAppInbound(ctx, msg.From, name, msg.ID, body)
+				if err != nil {
 					return err
+				}
+				if ingested && s.bot != nil {
+					if botErr := s.bot.HandleInbound(ctx, msg.From, name, msg.ID, body); botErr != nil {
+						s.log.Error("whatsapp bot reply failed", "error", botErr, "from", msg.From)
+					}
 				}
 			}
 			for _, st := range value.Statuses {

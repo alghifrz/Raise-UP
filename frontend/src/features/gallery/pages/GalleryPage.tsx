@@ -91,7 +91,7 @@ export function GalleryPage() {
       {!isLoading && !isError && items.length === 0 ? (
         <EmptyState
           title="Belum ada foto di galeri."
-          description="Tambahkan foto baru menggunakan URL gambar."
+          description="Unggah foto dokumentasi pertama untuk ditampilkan di portal publik."
           action={
             <Button type="button" onClick={() => setCreateOpen(true)}>
               Tambah Foto
@@ -127,7 +127,7 @@ export function GalleryPage() {
       <Modal
         open={createOpen}
         title="Tambah Foto"
-        description="Masukkan URL gambar yang dapat diakses publik."
+        description="Pilih foto JPG, PNG, atau WebP dengan ukuran maksimal 10 MB."
         onClose={() => setCreateOpen(false)}
       >
         <GalleryForm

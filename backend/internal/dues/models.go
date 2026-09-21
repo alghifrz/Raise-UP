@@ -122,6 +122,13 @@ type PeriodSummary struct {
 	OutstandingTotal int64  `json:"outstanding_total"`
 }
 
+// ReminderResult summarizes manual WhatsApp reminders for unpaid residents.
+type ReminderResult struct {
+	Total  int `json:"total"`
+	Sent   int `json:"sent"`
+	Failed int `json:"failed"`
+}
+
 // ResidentPaymentStatus is a derived PAID/UNPAID row for a resident in a period.
 type ResidentPaymentStatus struct {
 	ResidentID   string  `json:"resident_id"`

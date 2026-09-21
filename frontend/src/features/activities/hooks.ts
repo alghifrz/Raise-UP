@@ -10,6 +10,7 @@ import {
 import type { ActivityFilters, CreateActivityRequest, UpdateActivityRequest } from './types'
 
 export const activitiesQueryKey = ['activities'] as const
+const publicActivitiesQueryKey = ['public', 'activities'] as const
 
 export function activitiesListQueryKey(filters: ActivityFilters) {
   return [...activitiesQueryKey, 'list', filters] as const
@@ -41,6 +42,7 @@ function useInvalidateActivities() {
   return async (activityId?: string) => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: activitiesQueryKey }),
+      queryClient.invalidateQueries({ queryKey: publicActivitiesQueryKey }),
       queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey }),
       activityId
         ? queryClient.invalidateQueries({ queryKey: activityDetailQueryKey(activityId) })

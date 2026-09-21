@@ -16,6 +16,7 @@ import (
 	"github.com/diuk/raiseup/internal/activity"
 	"github.com/diuk/raiseup/internal/announcement"
 	"github.com/diuk/raiseup/internal/auth"
+	"github.com/diuk/raiseup/internal/bot"
 	"github.com/diuk/raiseup/internal/chat"
 	"github.com/diuk/raiseup/internal/complaint"
 	"github.com/diuk/raiseup/internal/dashboard"
@@ -24,6 +25,7 @@ import (
 	"github.com/diuk/raiseup/internal/gallery"
 	"github.com/diuk/raiseup/internal/resident"
 	sitesettings "github.com/diuk/raiseup/internal/site_settings"
+	supabasestorage "github.com/diuk/raiseup/internal/storage"
 	"github.com/diuk/raiseup/internal/village"
 	"github.com/diuk/raiseup/internal/whatsapp"
 	"github.com/diuk/raiseup/middleware"
@@ -43,7 +45,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
+	ctx, cancelApp := context.WithCancel(context.Background())
+	defer cancelApp()
 
 	pool, err := database.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -58,8 +61,11 @@ func main() {
 	} else {
 		log.Info("whatsapp cloud api disabled")
 	}
+	if cfg.WhatsApp.BotEnabled {
+		log.Info("whatsapp public bot enabled")
+	}
 
-	router := setupRouter(cfg, log, pool)
+	router := setupRouter(ctx, cfg, log, pool)
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%s", cfg.Port),
@@ -83,6 +89,7 @@ func main() {
 	sig := <-quit
 
 	log.Info("shutdown signal received", "signal", sig.String())
+	cancelApp()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
@@ -95,7 +102,7 @@ func main() {
 	log.Info("server stopped")
 }
 
-func setupRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) *gin.Engine {
+func setupRouter(appCtx context.Context, cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
 	tokens := jwtutil.NewManager(cfg.JWTSecret, cfg.JWTExpiresIn)
@@ -144,7 +151,20 @@ func setupRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) *gin.
 
 	galleryRepo := gallery.NewRepository(pool)
 	galleryService := gallery.NewService(galleryRepo)
-	galleryHandler := gallery.NewHandler(galleryService, log)
+	if cfg.Supabase.IsConfigured() {
+		galleryService.SetObjectStorage(
+			supabasestorage.NewClient(cfg.Supabase.URL, cfg.Supabase.ServiceRoleKey),
+			cfg.Supabase.GalleryBucket,
+		)
+		log.Info("supabase gallery storage enabled", "bucket", cfg.Supabase.GalleryBucket)
+	} else {
+		log.Info("supabase gallery storage disabled")
+	}
+	galleryHandler := gallery.NewHandler(
+		galleryService,
+		log,
+		cfg.Supabase.GalleryMaxUploadBytes,
+	)
 
 	siteSettingsRepo := sitesettings.NewRepository(pool)
 	siteSettingsService := sitesettings.NewService(siteSettingsRepo)
@@ -161,9 +181,26 @@ func setupRouter(cfg *config.Config, log *slog.Logger, pool *pgxpool.Pool) *gin.
 	waMessenger := whatsapp.NewMessengerAdapter(cfg.WhatsApp)
 	chatRepo := chat.NewRepository(pool)
 	chatService := chat.NewService(chatRepo, waMessenger, whatsapp.PhoneHelper{})
+	announcementService.SetMessenger(chatService)
+	duesService.SetMessenger(chatService)
 	chatHandler := chat.NewHandler(chatService, log)
 
-	waService := whatsapp.NewService(cfg.WhatsApp, waMessenger, chatService)
+	reminderScheduler := activity.NewReminderScheduler(activityRepo, residentRepo, chatService, log)
+	go reminderScheduler.Run(appCtx)
+
+	botSessionStore := bot.NewPostgresSessionStore(pool)
+	botService := bot.NewService(
+		chatService,
+		waMessenger,
+		announcementService,
+		activityService,
+		financeService,
+		complaintService,
+		botSessionStore,
+		cfg.WhatsApp.BotEnabled,
+		log,
+	)
+	waService := whatsapp.NewService(cfg.WhatsApp, waMessenger, chatService, botService, log)
 	waHandler := whatsapp.NewHandler(waService, log)
 
 	r := gin.New()

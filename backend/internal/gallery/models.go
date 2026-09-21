@@ -1,5 +1,21 @@
 package gallery
 
+// UploadRequest contains a validated image and its gallery metadata.
+type UploadRequest struct {
+	FileName    string
+	ContentType string
+	Data        []byte
+	Caption     string
+	SortOrder   *int32
+}
+
+// ReplaceImageRequest contains a replacement image and optional metadata updates.
+type ReplaceImageRequest struct {
+	UploadRequest
+	UpdateCaption   bool
+	UpdateSortOrder bool
+}
+
 // CreateRequest is the JSON body for POST /api/v1/gallery.
 type CreateRequest struct {
 	ImageURL    string `json:"image_url"`

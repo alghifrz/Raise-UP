@@ -28,7 +28,6 @@ type AnnouncementFormProps = {
 type FieldErrors = {
   title?: string
   body?: string
-  category?: string
   visibility?: string
   recipients?: string
 }
@@ -42,12 +41,11 @@ export function AnnouncementForm({
   onCancel,
 }: AnnouncementFormProps) {
   const [title, setTitle] = useState(initial?.title ?? '')
-  const [excerpt, setExcerpt] = useState(initial?.excerpt ?? '')
   const [body, setBody] = useState(initial?.body ?? '')
-  const [category, setCategory] = useState(initial?.category ?? '')
-  const [visibility, setVisibility] = useState<AnnouncementVisibility | ''>(
+  const [visibility, setVisibility] = useState<AnnouncementVisibility>(
     initial?.visibility ?? 'PUBLIC',
   )
+  const [sendToAll, setSendToAll] = useState(false)
   const [thumbnailUrl, setThumbnailUrl] = useState(initial?.thumbnail_url ?? '')
   const [recipients, setRecipients] = useState<ResidentOption[]>([])
   const [recipientsHydrated, setRecipientsHydrated] = useState(
@@ -113,14 +111,11 @@ export function AnnouncementForm({
     if (!body.trim()) {
       errors.body = 'Isi pengumuman wajib diisi.'
     }
-    if (!category.trim()) {
-      errors.category = 'Kategori wajib diisi.'
-    }
     if (!visibility) {
       errors.visibility = 'Visibilitas wajib dipilih.'
     }
-    if (visibility === 'PRIVATE' && recipients.length === 0) {
-      errors.recipients = 'Pengumuman privat harus memiliki minimal satu penerima.'
+    if (!sendToAll && recipients.length === 0) {
+      errors.recipients = 'Pilih minimal satu warga atau centang Semua warga.'
     }
 
     setFieldErrors(errors)
@@ -130,16 +125,13 @@ export function AnnouncementForm({
 
     setSubmitting(true)
     try {
-      const recipientIdsPayload =
-        visibility === 'PRIVATE' ? recipients.map((item) => item.id) : []
+      const recipientIdsPayload = recipients.map((item) => item.id)
 
       if (mode === 'create' && onSubmitCreate) {
         const payload: CreateAnnouncementRequest = {
           title: title.trim(),
-          excerpt: excerpt.trim(),
           body: body.trim(),
-          category: category.trim(),
-          visibility: visibility as AnnouncementVisibility,
+          visibility,
           recipient_ids: recipientIdsPayload,
         }
         const trimmedThumb = thumbnailUrl.trim()
@@ -152,10 +144,8 @@ export function AnnouncementForm({
       if (mode === 'edit' && onSubmitUpdate) {
         const payload: UpdateAnnouncementRequest = {
           title: title.trim(),
-          excerpt: excerpt.trim(),
           body: body.trim(),
-          category: category.trim(),
-          visibility: visibility as AnnouncementVisibility,
+          visibility,
           thumbnail_url: thumbnailUrl.trim() || null,
           recipient_ids: recipientIdsPayload,
         }
@@ -179,13 +169,6 @@ export function AnnouncementForm({
         disabled={submitting}
         required
       />
-      <Input
-        name="excerpt"
-        label="Ringkasan"
-        value={excerpt}
-        onChange={(event) => setExcerpt(event.target.value)}
-        disabled={submitting}
-      />
       <Textarea
         name="body"
         label="Isi"
@@ -195,31 +178,19 @@ export function AnnouncementForm({
         disabled={submitting}
         required
       />
-      <Input
-        name="category"
-        label="Kategori"
-        value={category}
-        onChange={(event) => setCategory(event.target.value)}
-        error={fieldErrors.category}
-        disabled={submitting}
-        required
-      />
       <Select
         name="visibility"
         label="Visibilitas"
         value={visibility}
-        onChange={(event) => {
-          const next = event.target.value as AnnouncementVisibility | ''
-          setVisibility(next)
-          if (next === 'PUBLIC') {
-            setRecipients([])
-          }
-        }}
+        onChange={(event) => setVisibility(event.target.value as AnnouncementVisibility)}
         options={ANNOUNCEMENT_VISIBILITY_OPTIONS}
         error={fieldErrors.visibility}
         disabled={submitting}
         required
       />
+      <p className="-mt-2 text-xs text-[var(--color-muted)]">
+        Public tampil di landing page. Private hanya tersedia untuk penerima yang dipilih.
+      </p>
       <Input
         name="thumbnail_url"
         label="URL Thumbnail (opsional)"
@@ -228,26 +199,27 @@ export function AnnouncementForm({
         disabled={submitting}
       />
 
-      {visibility === 'PRIVATE' ? (
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-[var(--color-ink)]">Penerima</p>
-          {!recipientsHydrated ? (
-            <p className="text-sm text-[var(--color-muted)]">Memuat penerima…</p>
-          ) : (
-            <>
-              {recipientLoadError ? (
-                <p className="text-sm text-amber-800">{recipientLoadError}</p>
-              ) : null}
-              <MultiResidentPicker
-                selected={recipients}
-                onChange={setRecipients}
-                disabled={submitting}
-                error={fieldErrors.recipients}
-              />
-            </>
-          )}
-        </div>
-      ) : null}
+      <div>
+        {!recipientsHydrated ? (
+          <div className="rounded-2xl border border-[var(--color-line)] p-3">
+            <p className="mt-2 text-sm text-[var(--color-muted)]">Memuat daftar warga…</p>
+          </div>
+        ) : (
+          <>
+            {recipientLoadError ? (
+              <p className="text-sm text-amber-800">{recipientLoadError}</p>
+            ) : null}
+            <MultiResidentPicker
+              selected={recipients}
+              onChange={setRecipients}
+              allSelected={sendToAll}
+              onAllSelectedChange={setSendToAll}
+              disabled={submitting}
+              error={fieldErrors.recipients}
+            />
+          </>
+        )}
+      </div>
 
       {formError ? (
         <p

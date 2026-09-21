@@ -84,6 +84,61 @@ func (c *Client) SendText(ctx context.Context, to, body string) (*SendTextResult
 	return c.send(ctx, payload)
 }
 
+// MarkAsRead tells Meta the inbound message was read (blue ticks on the contact's phone).
+func (c *Client) MarkAsRead(ctx context.Context, waMessageID string) error {
+	waMessageID = strings.TrimSpace(waMessageID)
+	if waMessageID == "" {
+		return nil
+	}
+	if c.phoneNumberID == "" || c.accessToken == "" {
+		return fmt.Errorf("%w: WhatsApp client is not configured", ErrNotConfigured)
+	}
+
+	payload := map[string]any{
+		"messaging_product": "whatsapp",
+		"status":            "read",
+		"message_id":        waMessageID,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal mark-as-read payload: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s/%s/messages", c.baseURL, c.apiVersion, c.phoneNumberID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create mark-as-read request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrSendFailed, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("read mark-as-read response: %w", err)
+	}
+
+	var parsed struct {
+		Success bool        `json:"success"`
+		Error   *graphError `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return fmt.Errorf("%w: invalid response (%s)", ErrSendFailed, truncate(string(respBody), 200))
+	}
+	if parsed.Error != nil {
+		return fmt.Errorf("%w: %s", ErrSendFailed, parsed.Error.Message)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("%w: HTTP %d", ErrSendFailed, resp.StatusCode)
+	}
+	return nil
+}
+
 // SendTemplate sends an approved message template.
 func (c *Client) SendTemplate(
 	ctx context.Context,

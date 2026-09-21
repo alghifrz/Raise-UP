@@ -4,10 +4,12 @@ import { cn } from '../../lib/utils'
 type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
   label: string
   error?: string
+  hint?: string
 }
 
-export function Textarea({ id, label, error, className, ...props }: TextareaProps) {
+export function Textarea({ id, label, error, hint, className, ...props }: TextareaProps) {
   const textareaId = id ?? props.name
+  const descriptionId = textareaId ? `${textareaId}-${error ? 'error' : 'hint'}` : undefined
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -31,12 +33,16 @@ export function Textarea({ id, label, error, className, ...props }: TextareaProp
           className,
         )}
         aria-invalid={error ? true : undefined}
-        aria-describedby={error && textareaId ? `${textareaId}-error` : undefined}
+        aria-describedby={error || hint ? descriptionId : undefined}
         {...props}
       />
       {error ? (
-        <p id={textareaId ? `${textareaId}-error` : undefined} className="text-sm text-[var(--color-danger)]">
+        <p id={descriptionId} className="text-sm text-[var(--color-danger)]">
           {error}
+        </p>
+      ) : hint ? (
+        <p id={descriptionId} className="text-xs text-[var(--color-muted)]">
+          {hint}
         </p>
       ) : null}
     </div>

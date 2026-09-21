@@ -35,12 +35,11 @@ export function AdminLayout() {
   return (
     <div
       className={cn(
-        'flex bg-[var(--color-surface)] text-[var(--color-ink)]',
-        isChat ? 'h-dvh overflow-hidden' : 'min-h-screen',
+        'flex h-dvh overflow-hidden bg-[var(--color-surface)] text-[var(--color-ink)]',
       )}
     >
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Topbar
           title={title}
           menuOpen={sidebarOpen}

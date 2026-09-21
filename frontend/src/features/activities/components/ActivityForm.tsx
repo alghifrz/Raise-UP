@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Button } from '../../../components/ui/Button'
 import { Input } from '../../../components/ui/Input'
 import { Textarea } from '../../../components/ui/Textarea'
-import { fromDatetimeLocalValue, isValidReminderTime, toDatetimeLocalValue } from '../date'
+import { fromDateInputValue, isValidReminderTime, toDateInputValue } from '../date'
 import { toActivityErrorMessage } from '../errors'
 import type { Activity, CreateActivityRequest, UpdateActivityRequest } from '../types'
 
@@ -35,7 +35,7 @@ export function ActivityForm({
   const [name, setName] = useState(initial?.name ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [dateLocal, setDateLocal] = useState(
-    initial?.date ? toDatetimeLocalValue(initial.date) : '',
+    initial?.date ? toDateInputValue(initial.date) : '',
   )
   const [reminderDaysBefore, setReminderDaysBefore] = useState(
     String(initial?.reminder_days_before ?? 0),
@@ -61,7 +61,7 @@ export function ActivityForm({
     let rfcDate = ''
     if (dateLocal) {
       try {
-        rfcDate = fromDatetimeLocalValue(dateLocal)
+        rfcDate = fromDateInputValue(dateLocal)
       } catch {
         errors.date = 'Tanggal kegiatan tidak valid.'
       }
@@ -139,8 +139,8 @@ export function ActivityForm({
       />
       <Input
         name="date"
-        label="Tanggal & waktu"
-        type="datetime-local"
+        label="Tanggal"
+        type="date"
         value={dateLocal}
         onChange={(event) => setDateLocal(event.target.value)}
         error={fieldErrors.date}
@@ -151,7 +151,7 @@ export function ActivityForm({
       <fieldset className="space-y-3 rounded-lg border border-[var(--color-line)] p-4">
         <legend className="px-1 text-sm font-medium text-[var(--color-ink)]">Reminder</legend>
         <p className="text-xs text-[var(--color-muted)]">
-          Konfigurasi pengingat kegiatan. Penjadwalan otomatis belum dijalankan di fase ini.
+          Reminder dikirim otomatis ke WhatsApp seluruh warga dan dicatat di interface chat.
         </p>
         <Input
           name="reminder_days_before"
@@ -165,8 +165,9 @@ export function ActivityForm({
         />
         <Input
           name="reminder_time"
-          label="Jam reminder (HH:MM)"
-          placeholder="09:00"
+          label="Jam reminder"
+          type="time"
+          step={60}
           value={reminderTime}
           onChange={(event) => setReminderTime(event.target.value)}
           error={fieldErrors.reminder_time}

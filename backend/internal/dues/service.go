@@ -41,15 +41,27 @@ type Store interface {
 	CountResidentPaymentStatus(ctx context.Context, periodID, search, statusFilter string) (int64, error)
 }
 
+// ReminderMessenger sends and records a SYSTEM WhatsApp message.
+type ReminderMessenger interface {
+	Enabled() bool
+	SendText(ctx context.Context, phone, body string) (messageID string, err error)
+}
+
 // Service implements dues use cases.
 type Service struct {
 	store     Store
 	residents ResidentReader
+	messenger ReminderMessenger
 }
 
 // NewService creates a dues service.
 func NewService(store Store, residents ResidentReader) *Service {
 	return &Service{store: store, residents: residents}
+}
+
+// SetMessenger enables manual unpaid-payment WhatsApp reminders.
+func (s *Service) SetMessenger(messenger ReminderMessenger) {
+	s.messenger = messenger
 }
 
 // ListPeriods returns a paginated filtered period list.
@@ -404,6 +416,89 @@ func (s *Service) PeriodSummary(ctx context.Context, periodID string) (*PeriodSu
 		CollectedTotal:   item.CollectedTotal,
 		OutstandingTotal: item.OutstandingTotal,
 	}, nil
+}
+
+// SendUnpaidReminders sends one WhatsApp reminder to every unpaid resident.
+func (s *Service) SendUnpaidReminders(ctx context.Context, periodID string) (*ReminderResult, error) {
+	if _, err := uuidutil.FromString(periodID); err != nil {
+		return nil, fmt.Errorf("%w: invalid period id", ErrInvalidRequest)
+	}
+	period, err := s.store.GetPeriodByID(ctx, periodID)
+	if err != nil {
+		return nil, err
+	}
+	if s.messenger == nil || !s.messenger.Enabled() {
+		return nil, ErrReminderUnavailable
+	}
+
+	const batchSize = int32(100)
+	result := &ReminderResult{}
+	for offset := int32(0); ; offset += batchSize {
+		items, err := s.store.ListResidentPaymentStatus(
+			ctx,
+			periodID,
+			"",
+			PaymentStatusUnpaid,
+			batchSize,
+			offset,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, item := range items {
+			result.Total++
+			if strings.TrimSpace(item.Phone) == "" {
+				result.Failed++
+				continue
+			}
+			message := formatUnpaidReminder(period, item.ResidentName)
+			if _, err := s.messenger.SendText(ctx, item.Phone, message); err != nil {
+				result.Failed++
+				continue
+			}
+			result.Sent++
+		}
+
+		if len(items) < int(batchSize) {
+			break
+		}
+	}
+	return result, nil
+}
+
+func formatUnpaidReminder(period db.DuesPeriod, residentName string) string {
+	months := [...]string{
+		"Januari", "Februari", "Maret", "April", "Mei", "Juni",
+		"Juli", "Agustus", "September", "Oktober", "November", "Desember",
+	}
+	month := strconv.Itoa(int(period.Month))
+	if period.Month >= 1 && period.Month <= 12 {
+		month = months[period.Month-1]
+	}
+	return fmt.Sprintf(
+		"Halo %s,\n\n⏰ *Pengingat Iuran RT*\n"+
+			"Periode: %s %d (Tahap %d)\n"+
+			"Nominal: %s\n\n"+
+			"Pembayaran Anda belum tercatat. Mohon segera melakukan pembayaran. Terima kasih.",
+		strings.TrimSpace(residentName),
+		month,
+		period.Year,
+		period.Half,
+		formatReminderAmount(period.Amount),
+	)
+}
+
+func formatReminderAmount(amount int64) string {
+	raw := strconv.FormatInt(amount, 10)
+	var b strings.Builder
+	for i, r := range raw {
+		if i > 0 && (len(raw)-i)%3 == 0 {
+			b.WriteByte('.')
+		}
+		b.WriteRune(r)
+	}
+	return "Rp" + b.String()
 }
 
 // ListResidentPaymentStatus returns derived PAID/UNPAID rows for residents in a period.

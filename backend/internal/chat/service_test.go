@@ -259,6 +259,19 @@ func (m *memoryStore) CountUnread(_ context.Context, conversationID, userID stri
 	return total, nil
 }
 
+func (m *memoryStore) GetMaxOtherLastReadAt(_ context.Context, conversationID, userID string) (pgtype.Timestamptz, error) {
+	var max pgtype.Timestamptz
+	for id, p := range m.participants[conversationID] {
+		if id == userID || !p.LastReadAt.Valid {
+			continue
+		}
+		if !max.Valid || p.LastReadAt.Time.After(max.Time) {
+			max = p.LastReadAt
+		}
+	}
+	return max, nil
+}
+
 func (m *memoryStore) MarkRead(_ context.Context, conversationID, userID string, readAt pgtype.Timestamptz) (db.ConversationParticipant, error) {
 	p, ok := m.participants[conversationID][userID]
 	if !ok {
@@ -450,6 +463,14 @@ func TestCreateDirectAndSendMessage(t *testing.T) {
 		t.Fatalf("expected unread 1, got %d", unread.UnreadCount)
 	}
 
+	senderBefore, err := svc.ListMessages(ctx, me, conv.ID, 1, 20)
+	if err != nil {
+		t.Fatalf("list as sender before read: %v", err)
+	}
+	if len(senderBefore.Items) != 1 || senderBefore.Items[0].IsRead {
+		t.Fatalf("expected unread tick for sender before peer read, got %#v", senderBefore.Items)
+	}
+
 	if _, err := svc.MarkRead(ctx, other, conv.ID); err != nil {
 		t.Fatalf("mark read: %v", err)
 	}
@@ -459,6 +480,14 @@ func TestCreateDirectAndSendMessage(t *testing.T) {
 	}
 	if after.UnreadCount != 0 {
 		t.Fatalf("expected unread 0, got %d", after.UnreadCount)
+	}
+
+	senderAfter, err := svc.ListMessages(ctx, me, conv.ID, 1, 20)
+	if err != nil {
+		t.Fatalf("list as sender after read: %v", err)
+	}
+	if len(senderAfter.Items) != 1 || !senderAfter.Items[0].IsRead {
+		t.Fatalf("expected blue read tick for sender after peer read, got %#v", senderAfter.Items)
 	}
 }
 

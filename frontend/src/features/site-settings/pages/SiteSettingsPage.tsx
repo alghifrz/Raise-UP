@@ -30,6 +30,24 @@ function looksLikeUrl(value: string): boolean {
   }
 }
 
+/** Accept either a raw URL or Google Maps' complete iframe snippet. */
+function normalizeEmbedUrl(value: string): string | null {
+  const input = value.trim()
+  if (!input) {
+    return ''
+  }
+  if (looksLikeUrl(input)) {
+    return input
+  }
+
+  const srcMatch = input.match(/<iframe\b[^>]*\bsrc\s*=\s*(["'])(.*?)\1/i)
+  if (!srcMatch) {
+    return null
+  }
+  const src = (srcMatch[2] ?? '').replaceAll('&amp;', '&').trim()
+  return looksLikeUrl(src) ? src : null
+}
+
 type SiteSettingsFormProps = {
   initial: SiteSettings
 }
@@ -63,10 +81,17 @@ function SiteSettingsForm({ initial }: SiteSettingsFormProps) {
     setFormError(null)
     setFeedback(null)
 
+    const normalizedEmbedUrl = normalizeEmbedUrl(embedUrl)
+    if (normalizedEmbedUrl === null) {
+      setFormError(
+        'Kode embed peta tidak valid. Tempel kode <iframe> dari Google Maps atau URL embed-nya.',
+      )
+      return
+    }
+
     if (
       !looksLikeUrl(chairmanPhotoUrl) ||
       !looksLikeUrl(mapsUrl) ||
-      !looksLikeUrl(embedUrl) ||
       !looksLikeUrl(whatsappUrl)
     ) {
       setFormError('URL yang diisi harus valid (http/https) atau dikosongkan.')
@@ -85,18 +110,21 @@ function SiteSettingsForm({ initial }: SiteSettingsFormProps) {
         map_title: mapTitle.trim(),
         map_description: mapDescription.trim(),
         maps_url: optionalUrl(mapsUrl),
-        embed_url: optionalUrl(embedUrl),
+        embed_url: normalizedEmbedUrl,
         address: address.trim(),
         phone: phone.trim(),
         whatsapp_url: optionalUrl(whatsappUrl),
         footer_blurb: footerBlurb.trim(),
       })
+      setEmbedUrl(updated.embed_url ?? '')
       setSavedAt(updated.updated_at)
       setFeedback('Pengaturan situs berhasil disimpan.')
     } catch (err) {
       setFormError(toSiteSettingsErrorMessage(err))
     }
   }
+
+  const mapPreviewUrl = normalizeEmbedUrl(embedUrl)
 
   return (
     <>
@@ -185,10 +213,12 @@ function SiteSettingsForm({ initial }: SiteSettingsFormProps) {
             />
             <Input
               name="maps_url"
-              label="Maps URL"
+              label="Link Google Maps"
               value={mapsUrl}
               onChange={(event) => setMapsUrl(event.target.value)}
               disabled={updateMutation.isPending}
+              placeholder="https://maps.app.goo.gl/..."
+              hint="Buka Google Maps → Bagikan → Salin link. Link ini digunakan oleh tombol petunjuk arah."
             />
             <div className="sm:col-span-2">
               <Textarea
@@ -200,19 +230,39 @@ function SiteSettingsForm({ initial }: SiteSettingsFormProps) {
               />
             </div>
             <Input
-              name="embed_url"
-              label="Embed URL"
-              value={embedUrl}
-              onChange={(event) => setEmbedUrl(event.target.value)}
-              disabled={updateMutation.isPending}
-            />
-            <Input
               name="address"
               label="Alamat"
               value={address}
               onChange={(event) => setAddress(event.target.value)}
               disabled={updateMutation.isPending}
             />
+            <div className="sm:col-span-2">
+              <Textarea
+                name="embed_url"
+                label="Embed Google Maps"
+                value={embedUrl}
+                onChange={(event) => setEmbedUrl(event.target.value)}
+                disabled={updateMutation.isPending}
+                placeholder='<iframe src="https://www.google.com/maps/embed?pb=..." ...></iframe>'
+                hint="Google Maps → Bagikan → Sematkan peta → Salin HTML. Tempel seluruh kode iframe di sini; URL-nya akan diambil otomatis."
+                className="min-h-32 font-mono text-xs"
+              />
+            </div>
+            {mapPreviewUrl ? (
+              <div className="sm:col-span-2">
+                <p className="mb-1.5 text-sm font-semibold text-[var(--color-ink)]">
+                  Preview peta
+                </p>
+                <iframe
+                  title={mapTitle.trim() || 'Preview lokasi'}
+                  src={mapPreviewUrl}
+                  className="h-72 w-full rounded-2xl border border-[var(--color-line)]"
+                  loading="lazy"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  allowFullScreen
+                />
+              </div>
+            ) : null}
           </div>
         </Card>
 

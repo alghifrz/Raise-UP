@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Button } from '../../../components/ui/Button'
 import { ImageWithFallback } from '../../../components/ui/ImageWithFallback'
 import { Input } from '../../../components/ui/Input'
@@ -18,9 +18,12 @@ type GalleryFormProps = {
 }
 
 type FieldErrors = {
-  image_url?: string
+  image?: string
   sort_order?: string
 }
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
 export function GalleryForm({
   mode,
@@ -30,21 +33,35 @@ export function GalleryForm({
   onSubmitUpdate,
   onCancel,
 }: GalleryFormProps) {
-  const [imageUrl, setImageUrl] = useState(initial?.image_url ?? '')
-  const [storagePath, setStoragePath] = useState(initial?.storage_path ?? '')
+  const [image, setImage] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState(initial?.image_url ?? '')
   const [caption, setCaption] = useState(initial?.caption ?? '')
   const [sortOrder, setSortOrder] = useState(String(initial?.sort_order ?? 0))
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  useEffect(() => {
+    if (!image) {
+      setPreviewUrl(initial?.image_url ?? '')
+      return
+    }
+    const objectUrl = URL.createObjectURL(image)
+    setPreviewUrl(objectUrl)
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [image, initial?.image_url])
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setFormError(null)
 
     const errors: FieldErrors = {}
-    if (!imageUrl.trim()) {
-      errors.image_url = 'Gambar wajib memiliki URL.'
+    if (mode === 'create' && !image) {
+      errors.image = 'Pilih foto yang akan diunggah.'
+    } else if (image && !ALLOWED_IMAGE_TYPES.has(image.type)) {
+      errors.image = 'Format foto harus JPG, PNG, atau WebP.'
+    } else if (image && image.size > MAX_IMAGE_BYTES) {
+      errors.image = 'Ukuran foto maksimal 10 MB.'
     }
 
     const sort = Number.parseInt(sortOrder, 10)
@@ -60,17 +77,18 @@ export function GalleryForm({
     setSubmitting(true)
     try {
       if (mode === 'create' && onSubmitCreate) {
+        if (!image) {
+          return
+        }
         await onSubmitCreate({
-          image_url: imageUrl.trim(),
-          storage_path: storagePath.trim(),
+          image,
           caption: caption.trim(),
           sort_order: sort,
         })
       }
       if (mode === 'edit' && onSubmitUpdate) {
         await onSubmitUpdate({
-          image_url: imageUrl.trim(),
-          storage_path: storagePath.trim(),
+          image: image ?? undefined,
           caption: caption.trim(),
           sort_order: sort,
         })
@@ -84,35 +102,42 @@ export function GalleryForm({
 
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
-      <Input
-        name="image_url"
-        label="URL Gambar"
-        value={imageUrl}
-        onChange={(event) => setImageUrl(event.target.value)}
-        error={fieldErrors.image_url}
-        disabled={submitting}
-        required
-      />
+      <div>
+        <label className="mb-1.5 block text-sm font-medium text-[var(--color-ink)]" htmlFor="gallery-image">
+          {mode === 'create' ? 'Foto' : 'Ganti foto (opsional)'}
+        </label>
+        <input
+          id="gallery-image"
+          name="image"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={(event) => {
+            setImage(event.target.files?.[0] ?? null)
+            setFieldErrors((current) => ({ ...current, image: undefined }))
+          }}
+          disabled={submitting}
+          required={mode === 'create'}
+          className="block w-full rounded-xl border border-[var(--color-line)] bg-white px-3 py-2 text-sm text-[var(--color-ink)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--color-primary-soft)] file:px-3 file:py-1.5 file:font-medium file:text-[var(--color-primary)]"
+        />
+        <p className="mt-1 text-xs text-[var(--color-muted)]">JPG, PNG, atau WebP. Maksimal 10 MB.</p>
+        {fieldErrors.image ? (
+          <p className="mt-1 text-sm text-[var(--color-danger)]" role="alert">
+            {fieldErrors.image}
+          </p>
+        ) : null}
+      </div>
 
-      {imageUrl.trim() ? (
+      {previewUrl ? (
         <div>
           <p className="mb-1.5 text-sm font-medium text-[var(--color-ink)]">Preview</p>
           <ImageWithFallback
-            src={imageUrl.trim()}
+            src={previewUrl}
             alt={caption.trim() || 'Preview gambar'}
             className="h-40 w-full rounded-md"
             fallbackLabel="Preview tidak tersedia"
           />
         </div>
       ) : null}
-
-      <Input
-        name="storage_path"
-        label="Storage Path (opsional)"
-        value={storagePath}
-        onChange={(event) => setStoragePath(event.target.value)}
-        disabled={submitting}
-      />
       <Textarea
         name="caption"
         label="Caption"

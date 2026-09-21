@@ -1,13 +1,18 @@
 package gallery
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"path"
 	"strings"
 	"time"
 
 	db "github.com/diuk/raiseup/db/generated"
 	"github.com/diuk/raiseup/pkg/uuidutil"
+	"github.com/google/uuid"
 )
 
 const (
@@ -26,14 +31,28 @@ type Store interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// ObjectStorage is the subset of object storage used by the gallery service.
+type ObjectStorage interface {
+	Upload(ctx context.Context, bucket, objectPath, contentType string, body io.Reader) (string, error)
+	Delete(ctx context.Context, bucket, objectPath string) error
+}
+
 // Service implements gallery use cases.
 type Service struct {
-	store Store
+	store         Store
+	objectStorage ObjectStorage
+	bucket        string
 }
 
 // NewService creates a gallery service.
 func NewService(store Store) *Service {
 	return &Service{store: store}
+}
+
+// SetObjectStorage enables managed gallery uploads.
+func (s *Service) SetObjectStorage(objectStorage ObjectStorage, bucket string) {
+	s.objectStorage = objectStorage
+	s.bucket = strings.TrimSpace(bucket)
 }
 
 // List returns a paginated filtered gallery list.
@@ -113,6 +132,45 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Item, error) 
 	return &mapped, nil
 }
 
+// CreateUploaded validates, stores, and creates a gallery item for an image upload.
+func (s *Service) CreateUploaded(ctx context.Context, req UploadRequest) (*Item, error) {
+	contentType, extension, err := validateImage(req.Data)
+	if err != nil {
+		return nil, err
+	}
+	if s.objectStorage == nil || s.bucket == "" {
+		return nil, ErrStorageUnavailable
+	}
+	sortOrder, err := validatedSortOrder(req.SortOrder)
+	if err != nil {
+		return nil, err
+	}
+
+	objectPath := newObjectPath(extension)
+	publicURL, err := s.objectStorage.Upload(
+		ctx, s.bucket, objectPath, contentType, bytes.NewReader(req.Data),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("upload gallery image: %w", err)
+	}
+
+	item, err := s.store.Create(ctx, db.CreateGalleryItemParams{
+		ImageUrl:    publicURL,
+		StoragePath: objectPath,
+		Caption:     strings.TrimSpace(req.Caption),
+		SortOrder:   sortOrder,
+	})
+	if err != nil {
+		_ = s.objectStorage.Delete(context.WithoutCancel(ctx), s.bucket, objectPath)
+		return nil, err
+	}
+	mapped, err := toAPIItem(item)
+	if err != nil {
+		return nil, err
+	}
+	return &mapped, nil
+}
+
 // Update partially updates a gallery item.
 func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*Item, error) {
 	pgID, err := uuidutil.FromString(id)
@@ -157,12 +215,120 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*It
 	return &mapped, nil
 }
 
+// ReplaceImage uploads a new object and swaps it into an existing gallery item.
+func (s *Service) ReplaceImage(ctx context.Context, id string, req ReplaceImageRequest) (*Item, error) {
+	pgID, err := uuidutil.FromString(id)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid gallery item id", ErrInvalidRequest)
+	}
+	existing, err := s.store.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	contentType, extension, err := validateImage(req.Data)
+	if err != nil {
+		return nil, err
+	}
+	if s.objectStorage == nil || s.bucket == "" {
+		return nil, ErrStorageUnavailable
+	}
+
+	objectPath := newObjectPath(extension)
+	publicURL, err := s.objectStorage.Upload(
+		ctx, s.bucket, objectPath, contentType, bytes.NewReader(req.Data),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("upload replacement gallery image: %w", err)
+	}
+
+	arg := db.UpdateGalleryItemParams{
+		ID:          pgID,
+		ImageUrl:    &publicURL,
+		StoragePath: &objectPath,
+	}
+	if req.UpdateCaption {
+		caption := strings.TrimSpace(req.Caption)
+		arg.Caption = &caption
+	}
+	if req.UpdateSortOrder {
+		sortOrder, validateErr := validatedSortOrder(req.SortOrder)
+		if validateErr != nil {
+			_ = s.objectStorage.Delete(context.WithoutCancel(ctx), s.bucket, objectPath)
+			return nil, validateErr
+		}
+		arg.SortOrder = &sortOrder
+	}
+
+	item, err := s.store.Update(ctx, arg)
+	if err != nil {
+		_ = s.objectStorage.Delete(context.WithoutCancel(ctx), s.bucket, objectPath)
+		return nil, err
+	}
+	if existing.StoragePath != "" {
+		_ = s.objectStorage.Delete(context.WithoutCancel(ctx), s.bucket, existing.StoragePath)
+	}
+	mapped, err := toAPIItem(item)
+	if err != nil {
+		return nil, err
+	}
+	return &mapped, nil
+}
+
 // Delete removes a gallery item.
 func (s *Service) Delete(ctx context.Context, id string) error {
 	if _, err := uuidutil.FromString(id); err != nil {
 		return fmt.Errorf("%w: invalid gallery item id", ErrInvalidRequest)
 	}
+	item, err := s.store.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if item.StoragePath != "" {
+		if s.objectStorage == nil || s.bucket == "" {
+			return ErrStorageUnavailable
+		}
+		if err := s.objectStorage.Delete(ctx, s.bucket, item.StoragePath); err != nil {
+			return fmt.Errorf("delete gallery image: %w", err)
+		}
+	}
 	return s.store.Delete(ctx, id)
+}
+
+func validatedSortOrder(value *int32) (int32, error) {
+	if value == nil {
+		return 0, nil
+	}
+	if *value < 0 {
+		return 0, fmt.Errorf("%w: sort_order must be >= 0", ErrInvalidRequest)
+	}
+	return *value, nil
+}
+
+func validateImage(data []byte) (contentType, extension string, err error) {
+	if len(data) == 0 {
+		return "", "", fmt.Errorf("%w: image file is required", ErrInvalidRequest)
+	}
+	switch detected := http.DetectContentType(data); detected {
+	case "image/jpeg":
+		return detected, ".jpg", nil
+	case "image/png":
+		return detected, ".png", nil
+	case "image/webp":
+		return detected, ".webp", nil
+	default:
+		return "", "", fmt.Errorf(
+			"%w: image must be JPEG, PNG, or WebP", ErrInvalidRequest,
+		)
+	}
+}
+
+func newObjectPath(extension string) string {
+	now := time.Now().UTC()
+	return path.Join(
+		fmt.Sprintf("%04d", now.Year()),
+		fmt.Sprintf("%02d", int(now.Month())),
+		uuid.NewString()+extension,
+	)
 }
 
 func normalizePage(page, pageSize int) (int, int, error) {

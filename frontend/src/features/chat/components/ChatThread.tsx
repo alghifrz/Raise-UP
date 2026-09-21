@@ -142,10 +142,17 @@ export function ChatThread({
         ) : null}
 
         {chronological.map((message) => {
+          // SYSTEM (bot) + pesan admin sendiri = sisi sistem (kanan)
           const mine =
-            message.sender_kind === 'USER' &&
-            Boolean(currentUserId) &&
-            message.sender_id === currentUserId
+            message.sender_kind === 'SYSTEM' ||
+            (message.sender_kind === 'USER' &&
+              Boolean(currentUserId) &&
+              message.sender_id === currentUserId)
+          const read =
+            message.is_read ||
+            (conversation.type === 'WHATSAPP' &&
+              typeof message.wa_status === 'string' &&
+              message.wa_status.toLowerCase() === 'read')
           return (
             <div
               key={message.id}
@@ -156,29 +163,39 @@ export function ChatThread({
                   'max-w-[min(100%,28rem)] rounded-2xl px-3.5 py-2 shadow-sm',
                   mine
                     ? 'rounded-br-md bg-[var(--color-secondary)] text-[var(--color-secondary-ink)]'
-                    : message.sender_kind === 'CONTACT'
-                      ? 'rounded-bl-md bg-[#DCF8C6] text-[var(--color-ink)]'
-                      : 'rounded-bl-md bg-[var(--color-panel)] text-[var(--color-ink)] ring-1 ring-[var(--color-line)]',
+                    : 'rounded-bl-md bg-[#DCF8C6] text-[var(--color-ink)]',
                 )}
               >
+                {message.sender_kind === 'SYSTEM' ? (
+                  <p className="mb-0.5 text-[11px] font-bold text-[var(--color-secondary-ink)]/80">
+                    Bot
+                  </p>
+                ) : null}
                 {!mine && conversation.type === 'GROUP' && message.sender_kind === 'USER' ? (
                   <p className="mb-0.5 text-[11px] font-bold text-[var(--color-tertiary)]">
                     {conversation.participants.find((p) => p.id === message.sender_id)?.name ??
                       'Admin'}
                   </p>
                 ) : null}
-                {/* {!mine && message.sender_kind === 'CONTACT' ? (
-                  <p className="mb-0.5 text-[11px] font-bold text-[#075E54]">Warga</p>
-                ) : null} */}
                 <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.body}</p>
                 <p
                   className={cn(
-                    'mt-1 text-right text-[10px]',
+                    'mt-1 flex items-center justify-end gap-1 text-[10px]',
                     mine ? 'text-[var(--color-secondary-ink)]/70' : 'text-[var(--color-muted)]',
                   )}
                 >
-                  {formatMessageTime(message.created_at)}
-                  {mine && message.wa_status ? ` · ${message.wa_status}` : ''}
+                  <span>{formatMessageTime(message.created_at)}</span>
+                  {mine ? (
+                    <span
+                      className={cn(
+                        'material-symbols-outlined text-[14px] leading-none',
+                        read ? 'text-[#53BDEB]' : 'opacity-70',
+                      )}
+                      aria-label={read ? 'Dibaca' : 'Terkirim'}
+                    >
+                      done_all
+                    </span>
+                  ) : null}
                 </p>
               </div>
             </div>

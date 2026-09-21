@@ -20,6 +20,7 @@ type Config struct {
 	ShutdownTimeout    time.Duration
 
 	WhatsApp WhatsAppConfig
+	Supabase SupabaseConfig
 
 	// Optional seed credentials (used by cmd/seed only).
 	AdminEmail    string
@@ -28,16 +29,30 @@ type Config struct {
 	AdminRole     string
 }
 
+// SupabaseConfig holds the server-side credentials used for Storage.
+type SupabaseConfig struct {
+	URL                   string
+	ServiceRoleKey        string
+	GalleryBucket         string
+	GalleryMaxUploadBytes int64
+}
+
+// IsConfigured reports whether Supabase Storage can be used.
+func (s SupabaseConfig) IsConfigured() bool {
+	return s.URL != "" && s.ServiceRoleKey != ""
+}
+
 // WhatsAppConfig holds Meta WhatsApp Cloud API settings.
 // When required credentials are missing, Enabled is forced to false.
 type WhatsAppConfig struct {
-	Enabled            bool
-	APIVersion         string
-	PhoneNumberID      string
-	BusinessAccountID  string
-	AccessToken        string
-	VerifyToken        string
-	AppSecret          string
+	Enabled           bool
+	BotEnabled        bool
+	APIVersion        string
+	PhoneNumberID     string
+	BusinessAccountID string
+	AccessToken       string
+	VerifyToken       string
+	AppSecret         string
 }
 
 // Load reads configuration from environment variables.
@@ -45,6 +60,7 @@ type WhatsAppConfig struct {
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 	_ = godotenv.Load("../.env")
+	_ = godotenv.Load("../../.env")
 
 	cfg := &Config{
 		Port:            getEnv("PORT", "8080"),
@@ -56,8 +72,15 @@ func Load() (*Config, error) {
 		AdminPassword:   os.Getenv("ADMIN_PASSWORD"),
 		AdminName:       getEnv("ADMIN_NAME", "Administrator"),
 		AdminRole:       getEnv("ADMIN_ROLE", "SUPER_ADMIN"),
+		Supabase: SupabaseConfig{
+			URL:                   strings.TrimRight(strings.TrimSpace(os.Getenv("SUPABASE_URL")), "/"),
+			ServiceRoleKey:        supabaseServerKey(),
+			GalleryBucket:         getEnv("SUPABASE_GALLERY_BUCKET", "gallery"),
+			GalleryMaxUploadBytes: 10 << 20,
+		},
 		WhatsApp: WhatsAppConfig{
 			Enabled:           parseBoolEnv("WHATSAPP_ENABLED", false),
+			BotEnabled:        parseBoolEnv("WHATSAPP_BOT_ENABLED", false),
 			APIVersion:        getEnv("WHATSAPP_API_VERSION", "v21.0"),
 			PhoneNumberID:     strings.TrimSpace(os.Getenv("WHATSAPP_PHONE_NUMBER_ID")),
 			BusinessAccountID: strings.TrimSpace(os.Getenv("WHATSAPP_BUSINESS_ACCOUNT_ID")),
@@ -78,6 +101,14 @@ func Load() (*Config, error) {
 		cfg.ShutdownTimeout = time.Duration(seconds) * time.Second
 	}
 
+	if maxUploadStr := os.Getenv("SUPABASE_GALLERY_MAX_UPLOAD_BYTES"); maxUploadStr != "" {
+		maxUpload, err := strconv.ParseInt(maxUploadStr, 10, 64)
+		if err != nil || maxUpload <= 0 {
+			return nil, fmt.Errorf("SUPABASE_GALLERY_MAX_UPLOAD_BYTES must be a positive integer")
+		}
+		cfg.Supabase.GalleryMaxUploadBytes = maxUpload
+	}
+
 	if expires := os.Getenv("JWT_EXPIRES_IN"); expires != "" {
 		d, err := parseDuration(expires)
 		if err != nil {
@@ -87,6 +118,8 @@ func Load() (*Config, error) {
 	}
 
 	cfg.WhatsApp.Enabled = cfg.WhatsApp.Enabled && cfg.WhatsApp.IsConfigured()
+	// Bot replies require Cloud API send capability.
+	cfg.WhatsApp.BotEnabled = cfg.WhatsApp.BotEnabled && cfg.WhatsApp.Enabled
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -116,10 +149,23 @@ func (c *Config) validate() error {
 	if c.Port == "" {
 		return fmt.Errorf("PORT is required")
 	}
+	if (c.Supabase.URL == "") != (c.Supabase.ServiceRoleKey == "") {
+		return fmt.Errorf("SUPABASE_URL and a Supabase server key must be set together")
+	}
+	if strings.TrimSpace(c.Supabase.GalleryBucket) == "" {
+		return fmt.Errorf("SUPABASE_GALLERY_BUCKET cannot be empty")
+	}
 	if c.JWTExpiresIn <= 0 {
 		return fmt.Errorf("JWT_EXPIRES_IN must be positive")
 	}
 	return nil
+}
+
+func supabaseServerKey() string {
+	if key := strings.TrimSpace(os.Getenv("SUPABASE_SECRET_KEY")); key != "" {
+		return key
+	}
+	return strings.TrimSpace(os.Getenv("SUPABASE_SERVICE_ROLE_KEY"))
 }
 
 func parseDuration(value string) (time.Duration, error) {

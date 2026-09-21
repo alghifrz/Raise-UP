@@ -163,14 +163,14 @@ export const landingGallery = {
 
 export const landingLocation = {
   eyebrowFallback: landingBrand.mapTitle,
-  headline: `Melayani Warga ${landingBrand.rtLabel} Lebak Asri`,
+  headline: `Melayani Warga Lebak Asri`,
   description:
     'Terbuka bagi setiap inisiatif kebaikan. Mari bertegur sapa langsung di Balai Warga atau koordinasikan kegiatan sosial bersama pengurus.',
   mapsCta: 'Buka di Google Maps',
   contactCta: 'Hubungi Pengurus',
   whatsappCta: 'Grup / WhatsApp',
   badges: [
-    { icon: 'location_on', label: 'Balai Warga Utama RT 03' },
+    { icon: 'location_on', label: 'Balai Warga Utama' },
     { icon: 'shield', label: 'Pos Kamling 24 Jam' },
     { icon: 'yard', label: 'Taman Kolaborasi Hijau' },
   ],

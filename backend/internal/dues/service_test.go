@@ -394,6 +394,17 @@ func newService(store *memoryStore) *dues.Service {
 	return dues.NewService(store, &memoryResidents{byID: store.residents})
 }
 
+type reminderMessenger struct {
+	sent []string
+}
+
+func (m *reminderMessenger) Enabled() bool { return true }
+
+func (m *reminderMessenger) SendText(_ context.Context, phone, body string) (string, error) {
+	m.sent = append(m.sent, phone+"|"+body)
+	return uuid.NewString(), nil
+}
+
 func TestCreatePeriodValid(t *testing.T) {
 	svc := newService(newMemoryStore())
 	item, err := svc.CreatePeriod(context.Background(), dues.CreatePeriodRequest{
@@ -766,6 +777,44 @@ func TestResidentPaymentStatus(t *testing.T) {
 	}
 	if len(page.Items) != 1 || page.Meta.TotalPages != 2 {
 		t.Fatalf("unexpected pagination: %+v", page)
+	}
+}
+
+func TestSendUnpaidReminders(t *testing.T) {
+	store := newMemoryStore()
+	paidResident := addResident(store, "Budi", "081111111111")
+	addResident(store, "Siti", "082222222222")
+	svc := newService(store)
+
+	period, err := svc.CreatePeriod(context.Background(), dues.CreatePeriodRequest{
+		Year: 2026, Month: 9, Half: 1, Amount: 50000,
+	})
+	if err != nil {
+		t.Fatalf("create period: %v", err)
+	}
+	_, err = svc.CreatePayment(context.Background(), dues.CreatePaymentRequest{
+		PeriodID:   period.ID,
+		ResidentID: paidResident,
+		Amount:     50000,
+		PaidAt:     "2026-09-21T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("create payment: %v", err)
+	}
+
+	messenger := &reminderMessenger{}
+	svc.SetMessenger(messenger)
+	result, err := svc.SendUnpaidReminders(context.Background(), period.ID)
+	if err != nil {
+		t.Fatalf("SendUnpaidReminders() error = %v", err)
+	}
+	if result.Total != 1 || result.Sent != 1 || result.Failed != 0 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if len(messenger.sent) != 1 ||
+		!strings.Contains(messenger.sent[0], "Siti") ||
+		!strings.Contains(messenger.sent[0], "Rp50.000") {
+		t.Fatalf("unexpected messages: %v", messenger.sent)
 	}
 }
 

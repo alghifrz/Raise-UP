@@ -90,6 +90,12 @@ Optional:
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` / `ADMIN_ROLE` | Used by `cmd/seed` only |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Used by Docker Compose |
 | `POSTGRES_PORT` | Host port for Postgres (default `5433` to avoid clashing with local installs on `5432`) |
+| `DOCKER_DATABASE_URL` | Optional external PostgreSQL URL used by the Compose API and migration containers |
+| `SUPABASE_URL` | Supabase project URL used by the backend Storage client |
+| `SUPABASE_SECRET_KEY` | Preferred server-only Storage credential (`sb_secret_...`); never expose it to the frontend |
+| `SUPABASE_SERVICE_ROLE_KEY` | Legacy server-key fallback when a secret key is unavailable |
+| `SUPABASE_GALLERY_BUCKET` | Public gallery bucket name (default `gallery`) |
+| `SUPABASE_GALLERY_MAX_UPLOAD_BYTES` | Maximum gallery upload size (default `10485760`) |
 | `WHATSAPP_ENABLED` | Enable Meta WhatsApp Cloud API (`true`/`false`; also requires credentials below) |
 | `WHATSAPP_API_VERSION` | Graph API version (default `v21.0`) |
 | `WHATSAPP_PHONE_NUMBER_ID` | Meta Phone number ID |
@@ -403,7 +409,9 @@ All gallery endpoints require JWT auth and role `SUPER_ADMIN` or `ADMIN_RW`.
 - `GET /api/v1/gallery?page=1&page_size=20&search=`
 - `GET /api/v1/gallery/:id`
 - `POST /api/v1/gallery`
+- `POST /api/v1/gallery/upload` — multipart upload (`image`, `caption`, `sort_order`)
 - `PATCH /api/v1/gallery/:id`
+- `PUT /api/v1/gallery/:id/image` — multipart image replacement with optional metadata
 - `DELETE /api/v1/gallery/:id`
 
 ```json
@@ -415,7 +423,29 @@ All gallery endpoints require JWT auth and role `SUPER_ADMIN` or `ADMIN_RW`.
 }
 ```
 
-`image_url` is required. `storage_path` / `caption` optional. `sort_order` defaults to `0` and must be `>= 0`. No file upload or remote URL fetching. Default order: `sort_order ASC`, `created_at DESC`.
+The JSON endpoint remains available for existing externally hosted images. Managed uploads accept JPEG, PNG, or WebP and default to a 10 MB limit. Supabase object paths are server-generated; the service role key never reaches the browser. Default order: `sort_order ASC`, `created_at DESC`.
+
+### Supabase setup and migration
+
+1. Create a Supabase project and copy the direct or session-pooler PostgreSQL URL. Use `sslmode=require`.
+2. Copy the project URL and service-role key from Supabase project settings into the backend `.env`.
+3. Create the public bucket:
+
+```powershell
+.\scripts\setup-supabase-gallery.ps1 `
+  -SupabaseUrl $env:SUPABASE_URL `
+  -ServerKey $env:SUPABASE_SECRET_KEY
+```
+
+4. Back up the local database, apply repository migrations, replace migration seed rows with all local data, and print source/target row counts:
+
+```powershell
+.\scripts\migrate-to-supabase.ps1 `
+  -SourceDatabaseUrl "postgres://raiseup:raiseup@127.0.0.1:5433/raiseup?sslmode=disable" `
+  -TargetDatabaseUrl "postgresql://postgres.PROJECT:PASSWORD@POOLER:5432/postgres?sslmode=require"
+```
+
+The script writes ignored rollback artifacts to `tmp/supabase-migration/`. Keep `source-full.dump` until login, CRUD, and gallery upload/replace/delete smoke tests pass. For a local Go process set `DATABASE_URL` to the target URL; for Docker Compose set `DOCKER_DATABASE_URL`.
 
 ## Site Settings API
 

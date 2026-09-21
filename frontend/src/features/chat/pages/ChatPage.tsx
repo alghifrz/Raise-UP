@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { InlineAlert } from '../../../components/ui/InlineAlert'
 import { useDebouncedValue } from '../../../lib/hooks/useDebouncedValue'
@@ -10,6 +11,8 @@ import { NewChatModal } from '../components/NewChatModal'
 import { NotifyModal } from '../components/NotifyModal'
 import { toChatErrorMessage } from '../errors'
 import {
+  chatUnreadFilters,
+  messagesListQueryKey,
   useConversation,
   useConversations,
   useMarkConversationRead,
@@ -19,12 +22,11 @@ import {
 } from '../hooks'
 import type { ConversationFilters, MessageFilters } from '../types'
 
-const DEFAULT_PAGE_SIZE = 50
-
 export function ChatPage() {
   const { conversationId } = useParams<{ conversationId?: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const queryClient = useQueryClient()
 
   const [searchInput, setSearchInput] = useState('')
   const debouncedSearch = useDebouncedValue(searchInput, 300)
@@ -32,14 +34,18 @@ export function ChatPage() {
   const [notifyOpen, setNotifyOpen] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
 
-  const conversationFilters = useMemo<ConversationFilters>(
-    () => ({
+  // Empty search must match chatUnreadFilters so badge + list share one cache entry.
+  const conversationFilters = useMemo<ConversationFilters>(() => {
+    const search = debouncedSearch.trim()
+    if (!search) {
+      return chatUnreadFilters
+    }
+    return {
       page: 1,
-      page_size: DEFAULT_PAGE_SIZE,
-      search: debouncedSearch.trim(),
-    }),
-    [debouncedSearch],
-  )
+      page_size: chatUnreadFilters.page_size,
+      search,
+    }
+  }, [debouncedSearch])
 
   const messageFilters = useMemo<MessageFilters>(
     () => ({
@@ -59,6 +65,33 @@ export function ChatPage() {
   const conversations = conversationsQuery.data?.items ?? []
   const messages = messagesQuery.data?.items ?? []
   const whatsappEnabled = Boolean(waStatusQuery.data?.enabled)
+
+  const activeInboxRow = conversations.find((c) => c.id === conversationId)
+  const inboxSyncKey = activeInboxRow
+    ? `${activeInboxRow.last_message_at ?? ''}:${activeInboxRow.unread_count}:${activeInboxRow.last_message_preview}`
+    : ''
+  const lastInboxSyncKey = useRef('')
+
+  useEffect(() => {
+    if (!conversationId || !inboxSyncKey) {
+      return
+    }
+    if (lastInboxSyncKey.current === inboxSyncKey) {
+      return
+    }
+    const isFirst = lastInboxSyncKey.current === ''
+    lastInboxSyncKey.current = inboxSyncKey
+    if (isFirst) {
+      return
+    }
+    void queryClient.invalidateQueries({
+      queryKey: messagesListQueryKey(conversationId, messageFilters),
+    })
+  }, [conversationId, inboxSyncKey, messageFilters, queryClient])
+
+  useEffect(() => {
+    lastInboxSyncKey.current = ''
+  }, [conversationId])
 
   useEffect(() => {
     if (!conversationId) {

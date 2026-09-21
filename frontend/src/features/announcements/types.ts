@@ -20,6 +20,11 @@ export type AnnouncementSummary = {
 
 export type Announcement = AnnouncementSummary & {
   recipient_ids: string[]
+  delivery?: {
+    total: number
+    sent: number
+    failed: number
+  }
 }
 
 export type AnnouncementFilters = {
@@ -38,9 +43,7 @@ export type AnnouncementListResponse = {
 
 export type CreateAnnouncementRequest = {
   title: string
-  excerpt: string
   body: string
-  category: string
   visibility: AnnouncementVisibility
   thumbnail_url?: string | null
   recipient_ids: string[]
@@ -48,9 +51,7 @@ export type CreateAnnouncementRequest = {
 
 export type UpdateAnnouncementRequest = {
   title?: string
-  excerpt?: string
   body?: string
-  category?: string
   visibility?: AnnouncementVisibility
   thumbnail_url?: string | null
   recipient_ids?: string[]

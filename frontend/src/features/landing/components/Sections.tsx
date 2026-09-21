@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useMemo, useState, type ReactNode } from 'react'
-import { formatDate, formatDateTime } from '../../../lib/utils'
+import { Link } from 'react-router-dom'
+import { formatDate } from '../../../lib/utils'
 import type { Activity } from '../../activities/types'
 import type { AnnouncementSummary } from '../../announcements/types'
 import type { GalleryItem } from '../../gallery/types'
@@ -89,6 +90,7 @@ export function AboutMosaicSection({
   gallery: GalleryItem[] | undefined
 }) {
   const reduce = useReducedMotion()
+  const [aboutExpanded, setAboutExpanded] = useState(false)
   const tiles = useMemo(() => {
     const photos = gallery?.slice(0, 4) ?? []
     return landingMosaicTiles.map((tile, index) => ({
@@ -98,8 +100,8 @@ export function AboutMosaicSection({
     }))
   }, [gallery])
 
-  const blurb =
-    profile?.vision?.trim() || profile?.history?.trim() || landingAbout.fallbackBlurb
+  const vision = profile?.vision?.trim() || landingAbout.fallbackBlurb
+  const history = profile?.history?.trim()
 
   return (
     <RevealBlock id="tentang" className="scroll-mt-24 py-10">
@@ -118,18 +120,47 @@ export function AboutMosaicSection({
               </h2>
             </div>
             <div className="max-w-md space-y-4">
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--lp-on-primary-muted)] line-clamp-5">
-                {blurb}
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--lp-on-primary-muted)]">
+                {vision}
               </p>
-              <a
-                href={landingAbout.cta.href}
-                className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-[var(--lp-white)] transition-colors hover:bg-white/10"
-              >
-                {landingAbout.cta.label}
-                <Icon name="arrow_forward" className="text-[16px] text-[var(--lp-gold)]" />
-              </a>
+              {history ? (
+                <button
+                  type="button"
+                  aria-expanded={aboutExpanded}
+                  aria-controls="about-history"
+                  onClick={() => setAboutExpanded((expanded) => !expanded)}
+                  className="group inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-2.5 text-sm font-semibold text-[var(--lp-white)] transition-all hover:border-white/25 hover:bg-white/10"
+                >
+                  {aboutExpanded ? 'Tutup Sejarah' : landingAbout.cta.label}
+                  <Icon
+                    name={aboutExpanded ? 'expand_less' : 'expand_more'}
+                    className="text-[18px] text-[var(--lp-gold)] transition-transform group-hover:translate-y-0.5"
+                  />
+                </button>
+              ) : null}
             </div>
           </div>
+
+          <AnimatePresence initial={false}>
+            {aboutExpanded && history ? (
+              <motion.div
+                id="about-history"
+                className="relative z-10 overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-6 sm:p-8"
+                initial={reduce ? false : { opacity: 0, height: 0, y: -8 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -8 }}
+                transition={{ duration: reduce ? 0 : 0.35, ease }}
+              >
+                <div className="mb-3 flex items-center gap-3">
+                  <Icon name="history_edu" className="text-2xl text-[var(--lp-gold)]" />
+                  <h3 className="text-lg font-semibold text-[var(--lp-white)]">Sejarah Lebak Asri</h3>
+                </div>
+                <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--lp-on-primary-muted)]">
+                  {history}
+                </p>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
 
           <div className="relative z-10 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {tiles.map((tile, index) => (
@@ -275,9 +306,12 @@ export function ProgramsSection({ items }: { items: AnnouncementSummary[] | unde
                       <Icon name="public" className="text-[14px] text-[var(--lp-green)]" />
                       Publik
                     </span>
-                    <a href={`#pengumuman-${item.id}`} className="font-semibold text-[var(--lp-primary)]">
+                    <Link
+                      to={`/pengumuman/${item.id}`}
+                      className="font-semibold text-[var(--lp-primary)] hover:text-[var(--lp-green)]"
+                    >
                       Baca
-                    </a>
+                    </Link>
                   </div>
                 </motion.article>
               ))}
@@ -285,27 +319,6 @@ export function ProgramsSection({ items }: { items: AnnouncementSummary[] | unde
           </AnimatePresence>
         )}
 
-        {list.length > 0 ? (
-          <div className="mt-8 space-y-3" id="pengumuman-detail">
-            {list.slice(0, 3).map((item) => (
-              <details
-                key={`detail-${item.id}`}
-                id={`pengumuman-${item.id}`}
-                className="group rounded-2xl bg-[var(--lp-white)] p-5 shadow-sm open:shadow-md"
-              >
-                <summary className="cursor-pointer list-none font-semibold text-[var(--lp-primary)] marker:content-none">
-                  <span className="flex items-center justify-between gap-3">
-                    {item.title}
-                    <Icon name="expand_more" className="transition group-open:rotate-180" />
-                  </span>
-                </summary>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-[var(--lp-muted)]">
-                  {item.body || item.excerpt}
-                </p>
-              </details>
-            ))}
-          </div>
-        ) : null}
       </LandingContainer>
     </RevealBlock>
   )
@@ -313,45 +326,192 @@ export function ProgramsSection({ items }: { items: AnnouncementSummary[] | unde
 
 export function AgendaSection({ items }: { items: Activity[] | undefined }) {
   const reduce = useReducedMotion()
+  const today = jakartaCalendarParts(new Date().toISOString())
+  const [calendar, setCalendar] = useState(() => ({
+    year: today.year,
+    month: today.month,
+  }))
+  const [showAll, setShowAll] = useState(false)
+  const activities = items ?? []
+  const displayedActivities = showAll ? activities : activities.slice(0, 3)
+  const firstWeekday = new Date(Date.UTC(calendar.year, calendar.month, 1)).getUTCDay()
+  const daysInMonth = new Date(Date.UTC(calendar.year, calendar.month + 1, 0)).getUTCDate()
+  const activityDays = new Set(
+    activities
+      .map((activity) => jakartaCalendarParts(activity.date))
+      .filter((date) => date.year === calendar.year && date.month === calendar.month)
+      .map((date) => date.day),
+  )
+  const calendarCells: Array<number | null> = [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
+  ]
+
+  function changeMonth(offset: number) {
+    setCalendar((current) => {
+      const date = new Date(Date.UTC(current.year, current.month + offset, 1))
+      return { year: date.getUTCFullYear(), month: date.getUTCMonth() }
+    })
+  }
+
   return (
-    <RevealBlock id="agenda" className="scroll-mt-24 py-8">
+    <RevealBlock id="agenda" className="scroll-mt-24 py-12">
       <LandingContainer>
-        <div className="mb-6">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--lp-green)]">
-            {landingAgenda.eyebrow}
-          </span>
-          <h2 className="text-[clamp(1.75rem,3vw,2.5rem)] font-bold text-[var(--lp-ink)]">
-            {landingAgenda.title}
-          </h2>
+        <div className="mb-8 flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-[clamp(1.75rem,3vw,2.5rem)] font-bold text-[var(--lp-ink)]">
+              {landingAgenda.title}
+            </h2>
+            <p className="mt-1 text-sm text-[var(--lp-muted)]">
+              Jadwal kegiatan lingkungan yang akan datang.
+            </p>
+          </div>
+          {activities.length > 3 ? (
+            <button
+              type="button"
+              className="shrink-0 text-sm font-semibold text-[var(--lp-green)] hover:text-[var(--lp-primary)]"
+              onClick={() => setShowAll((current) => !current)}
+            >
+              {showAll ? 'Ringkas' : 'Lihat semua →'}
+            </button>
+          ) : null}
         </div>
-        {!items?.length ? (
-          <p className="text-sm text-[var(--lp-muted)]">{landingAgenda.empty}</p>
-        ) : (
-          <ol className="relative space-y-0 border-l-2 border-[var(--lp-gold)]/50 pl-6">
-            {items.map((activity, index) => (
-              <motion.li
-                key={activity.id}
-                className="relative pb-8 last:pb-0"
-                initial={reduce ? false : { opacity: 0, x: -12 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: index * 0.06, duration: 0.45 }}
-              >
-                <span className="absolute -left-[1.85rem] top-1.5 h-3 w-3 rounded-full bg-[var(--lp-gold)] shadow-[0_0_0_4px_rgba(210,248,67,0.22)]" />
-                <time className="text-xs font-bold uppercase tracking-wider text-[var(--lp-green)]">
-                  {formatDateTime(activity.date)}
-                </time>
-                <h3 className="mt-1 text-lg font-bold text-[var(--lp-primary)]">{activity.name}</h3>
-                {activity.description ? (
-                  <p className="mt-1 max-w-2xl text-sm text-[var(--lp-muted)]">{activity.description}</p>
-                ) : null}
-              </motion.li>
-            ))}
-          </ol>
-        )}
+
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,1fr)]">
+          <div className="space-y-4">
+            {!activities.length ? (
+              <p className="rounded-2xl border border-black/[0.06] bg-[var(--lp-white)] p-6 text-sm text-[var(--lp-muted)]">
+                {landingAgenda.empty}
+              </p>
+            ) : (
+              displayedActivities.map((activity, index) => {
+                const date = jakartaCalendarParts(activity.date)
+                return (
+                  <motion.article
+                    key={activity.id}
+                    className="flex items-center gap-4 rounded-2xl border border-black/[0.08] bg-[var(--lp-white)] p-4 shadow-sm"
+                    initial={reduce ? false : { opacity: 0, y: 12 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: index * 0.06, duration: 0.4 }}
+                  >
+                    <time
+                      dateTime={activity.date}
+                      className="flex h-[4.5rem] w-[4.5rem] shrink-0 flex-col items-center justify-center rounded-xl bg-[var(--lp-surface-low)]"
+                    >
+                      <span className="text-[10px] font-bold uppercase text-[var(--lp-muted)]">
+                        {indonesianMonthShort(date.month)}
+                      </span>
+                      <span className="text-2xl font-bold leading-none text-[var(--lp-primary)]">
+                        {date.day}
+                      </span>
+                    </time>
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-semibold text-[var(--lp-muted)]">
+                        Kegiatan RT
+                      </p>
+                      <h3 className="mt-0.5 truncate text-base font-bold text-[var(--lp-primary)]">
+                        {activity.name}
+                      </h3>
+                      {activity.description ? (
+                        <p className="mt-1 line-clamp-1 text-xs text-[var(--lp-muted)]">
+                          {activity.description}
+                        </p>
+                      ) : null}
+                    </div>
+                  </motion.article>
+                )
+              })
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-black/[0.08] bg-[var(--lp-white)] p-5 shadow-sm sm:p-6">
+            <div className="mb-6 flex items-center justify-between">
+              <h3 className="font-bold capitalize text-[var(--lp-primary)]">
+                {indonesianCalendarMonth(calendar.year, calendar.month)}
+              </h3>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  aria-label="Bulan sebelumnya"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--lp-muted)] hover:bg-[var(--lp-surface-low)]"
+                  onClick={() => changeMonth(-1)}
+                >
+                  <Icon name="chevron_left" className="text-lg" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Bulan berikutnya"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--lp-muted)] hover:bg-[var(--lp-surface-low)]"
+                  onClick={() => changeMonth(1)}
+                >
+                  <Icon name="chevron_right" className="text-lg" />
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-7 text-center">
+              {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((day) => (
+                <span key={day} className="pb-3 text-[10px] font-bold text-[var(--lp-muted)]">
+                  {day}
+                </span>
+              ))}
+              {calendarCells.map((day, index) =>
+                day === null ? (
+                  <span key={`empty-${index}`} className="h-10" />
+                ) : (
+                  <span
+                    key={day}
+                    className={`relative flex h-10 items-center justify-center rounded-full text-xs ${
+                      today.year === calendar.year &&
+                      today.month === calendar.month &&
+                      today.day === day
+                        ? 'bg-[var(--lp-primary)] font-bold text-[var(--lp-on-primary)]'
+                        : 'text-[var(--lp-muted)]'
+                    }`}
+                  >
+                    {day}
+                    {activityDays.has(day) ? (
+                      <span className="absolute bottom-1 h-1.5 w-1.5 rounded-full bg-[var(--lp-green)]" />
+                    ) : null}
+                  </span>
+                ),
+              )}
+            </div>
+          </div>
+        </div>
       </LandingContainer>
     </RevealBlock>
   )
+}
+
+function jakartaCalendarParts(value: string): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(new Date(value))
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return {
+    year: Number(values.year),
+    month: Number(values.month) - 1,
+    day: Number(values.day),
+  }
+}
+
+function indonesianMonthShort(month: number): string {
+  return new Intl.DateTimeFormat('id-ID', { month: 'short', timeZone: 'UTC' })
+    .format(new Date(Date.UTC(2026, month, 1)))
+    .replace('.', '')
+    .toUpperCase()
+}
+
+function indonesianCalendarMonth(year: number, month: number): string {
+  return new Intl.DateTimeFormat('id-ID', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(year, month, 1)))
 }
 
 export function TransparencySection({ officials }: { officials: VillageOfficial[] | undefined }) {
@@ -487,85 +647,115 @@ export function TransparencySection({ officials }: { officials: VillageOfficial[
 
 export function GalleryStripSection({ items }: { items: GalleryItem[] | undefined }) {
   const reduce = useReducedMotion()
-  const photos = items ?? []
+  const photos = items?.slice(0, 6) ?? []
+  const tileClass = (index: number) => {
+    const layout = [
+      'sm:col-span-2 sm:row-span-2 lg:col-span-7 lg:row-span-2',
+      'lg:col-span-5',
+      'lg:col-span-5',
+      'lg:col-span-4',
+      'lg:col-span-4',
+      'lg:col-span-4',
+    ]
+    return layout[index % layout.length]
+  }
 
   return (
-    <RevealBlock id="galeri" className="scroll-mt-24 py-12">
+    <RevealBlock id="galeri" className="scroll-mt-24 py-16">
       <LandingContainer>
-        <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-          <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--lp-green)]">
-              {landingGallery.eyebrow}
-            </span>
-            <h2 className="text-[clamp(1.75rem,3vw,2.5rem)] font-bold text-[var(--lp-ink)]">
-              {landingGallery.title}
-            </h2>
-            <p className="mt-2 max-w-xl text-sm text-[var(--lp-muted)]">{landingGallery.description}</p>
+        <div className="relative overflow-hidden rounded-[2rem] bg-[var(--lp-surface-low)] p-4 sm:p-7 lg:p-10">
+          <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full border-[3rem] border-[var(--lp-green)]/5" />
+          <div className="relative mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+            <div className="max-w-2xl">
+              <div className="mb-3 flex items-center gap-3">
+                <span className="h-px w-10 bg-[var(--lp-green)]" />
+                <span className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--lp-green)]">
+                  {landingGallery.eyebrow}
+                </span>
+              </div>
+              <h2 className="text-[clamp(1.9rem,4vw,3.25rem)] font-bold leading-[1.05] tracking-[-0.035em] text-[var(--lp-ink)]">
+                {landingGallery.title}
+              </h2>
+              <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--lp-muted)]">
+                {landingGallery.description}
+              </p>
+            </div>
+            <a
+              href={landingGallery.cta.href}
+              className="group inline-flex items-center gap-3 self-start rounded-full border border-[var(--lp-green)]/15 bg-[var(--lp-white)] px-5 py-2.5 text-sm font-semibold text-[var(--lp-primary)] shadow-sm transition-all hover:-translate-y-0.5 hover:border-[var(--lp-green)]/30 hover:shadow-md sm:self-auto"
+            >
+              {landingGallery.cta.label}
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--lp-green)] text-white transition-transform group-hover:translate-x-0.5">
+                <Icon name="arrow_forward" className="text-[15px]" />
+              </span>
+            </a>
           </div>
-          <a
-            href={landingGallery.cta.href}
-            className="inline-flex items-center gap-2 self-start rounded-full bg-[var(--lp-surface-high)] px-5 py-2.5 text-sm font-semibold text-[var(--lp-primary)] transition-colors hover:bg-[var(--lp-surface-highest)] sm:self-auto"
-          >
-            {landingGallery.cta.label}
-            <Icon name="arrow_forward" className="text-[16px] text-[var(--lp-green)]" />
-          </a>
-        </div>
 
-        {photos.length === 0 ? (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {landingGallery.placeholders.map((placeholder, index) => (
-              <motion.div
-                key={placeholder.label}
-                className="relative h-64 overflow-hidden rounded-3xl border border-dashed border-[var(--lp-green)]/25 bg-[var(--lp-white)] shadow-sm"
-                initial={reduce ? false : { opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: index * 0.08, duration: 0.45 }}
-              >
-                <SafeImage
-                  src={placeholder.image}
-                  alt={placeholder.label}
-                  className="h-full w-full object-cover"
-                  fallback={
-                    <div className="flex h-full flex-col items-center justify-center">
-                      <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--lp-surface-low)] text-[var(--lp-green)]">
-                        <Icon name={placeholder.icon} className="text-[28px]" />
+          {photos.length === 0 ? (
+            <div className="relative grid auto-rows-[14rem] grid-flow-dense grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-12 lg:auto-rows-[12rem] lg:gap-4">
+              {landingGallery.placeholders.map((placeholder, index) => (
+                <motion.div
+                  key={placeholder.label}
+                  className={`group relative min-h-0 overflow-hidden rounded-[1.5rem] bg-[var(--lp-white)] shadow-sm ${tileClass(index)}`}
+                  initial={reduce ? false : { opacity: 0, y: 20, scale: 0.98 }}
+                  whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: index * 0.08, duration: 0.55 }}
+                >
+                  <SafeImage
+                    src={placeholder.image}
+                    alt={placeholder.label}
+                    className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                    fallback={
+                      <div className="flex h-full flex-col items-center justify-center">
+                        <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--lp-surface-low)] text-[var(--lp-green)]">
+                          <Icon name={placeholder.icon} className="text-[28px]" />
+                        </div>
+                        <p className="text-sm font-semibold text-[var(--lp-primary)]">{placeholder.label}</p>
+                        <p className="mt-1 text-xs text-[var(--lp-muted)]">{landingGallery.emptyCaption}</p>
                       </div>
-                      <p className="text-sm font-semibold text-[var(--lp-primary)]">{placeholder.label}</p>
-                      <p className="mt-1 text-xs text-[var(--lp-muted)]">{landingGallery.emptyCaption}</p>
-                    </div>
-                  }
-                />
-              </motion.div>
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {photos.map((photo, index) => (
-              <motion.figure
-                key={photo.id}
-                className="group relative overflow-hidden rounded-3xl bg-[var(--lp-white)] shadow-sm"
-                initial={reduce ? false : { opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: index * 0.04, duration: 0.45 }}
-                whileHover={reduce ? undefined : { y: -4 }}
-              >
-                <div className="relative h-64 overflow-hidden">
+                    }
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[var(--lp-primary)]/75 via-transparent to-transparent" />
+                  <div className="absolute inset-x-5 bottom-5">
+                    <p className="text-base font-semibold text-white">{placeholder.label}</p>
+                    <p className="mt-0.5 text-xs text-white/70">{landingGallery.emptyCaption}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          ) : (
+            <div className="relative grid auto-rows-[14rem] grid-flow-dense grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-12 lg:auto-rows-[12rem] lg:gap-4">
+              {photos.map((photo, index) => (
+                <motion.figure
+                  key={photo.id}
+                  className={`group relative min-h-0 overflow-hidden rounded-[1.5rem] bg-[var(--lp-white)] shadow-sm ${tileClass(index)}`}
+                  initial={reduce ? false : { opacity: 0, y: 20, scale: 0.98 }}
+                  whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: index * 0.06, duration: 0.55 }}
+                  whileHover={reduce ? undefined : { y: -3 }}
+                >
                   <img
                     src={photo.image_url}
                     alt={photo.caption || 'Dokumentasi kegiatan'}
-                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.04]"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[var(--lp-primary)]/70 via-transparent to-transparent opacity-80" />
-                  <figcaption className="absolute inset-x-4 bottom-4 text-sm font-semibold text-white">
-                    {photo.caption || `Dokumentasi ${landingBrand.siteName}`}
+                  <div className="absolute inset-0 bg-gradient-to-t from-[var(--lp-primary)]/85 via-[var(--lp-primary)]/5 to-transparent" />
+                  <div className="absolute left-5 top-5 flex h-8 min-w-8 items-center justify-center rounded-full border border-white/25 bg-black/10 px-2 text-[10px] font-bold tracking-wider text-white backdrop-blur-md">
+                    {String(index + 1).padStart(2, '0')}
+                  </div>
+                  <figcaption className="absolute inset-x-5 bottom-5">
+                    <span className="mb-2 block h-px w-8 bg-white/60 transition-all duration-300 group-hover:w-14" />
+                    <span className={`${index === 0 ? 'text-lg sm:text-xl' : 'text-sm'} font-semibold leading-snug text-white`}>
+                      {photo.caption || `Dokumentasi ${landingBrand.siteName}`}
+                    </span>
                   </figcaption>
-                </div>
-              </motion.figure>
-            ))}
-          </div>
-        )}
+                </motion.figure>
+              ))}
+            </div>
+          )}
+        </div>
       </LandingContainer>
     </RevealBlock>
   )
@@ -687,8 +877,8 @@ export function LocationBanner({ settings }: { settings: SiteSettings | undefine
                   className="inline-flex items-center gap-2 rounded-full bg-[var(--lp-gold)] px-7 py-3.5 text-sm font-bold text-[var(--lp-on-gold)] shadow-lg"
                   whileHover={reduce ? undefined : { scale: 1.02 }}
                 >
-                  {landingLocation.mapsCta}
-                  <Icon name="arrow_forward" className="text-[18px]" />
+                  <span className="text-[var(--lp-primary)]">{landingLocation.mapsCta}</span>
+                  <Icon name="arrow_forward" className="text-[18px] text-[var(--lp-primary)]" />
                 </motion.a>
                 {whatsapp ? (
                   <a
@@ -828,17 +1018,17 @@ export function LandingFooter({ settings }: { settings: SiteSettings | undefined
             </p>
             <a
               href={landingFooter.newsletterCta.href}
-              className="inline-flex items-center gap-2 rounded-full bg-[var(--lp-gold)] px-5 py-3 text-sm font-semibold text-[var(--lp-on-gold)]"
+              className="inline-flex items-center gap-2 rounded-full bg-[var(--lp-gold)] px-5 py-3 text-sm font-semibold"
             >
-              {landingFooter.newsletterCta.label}
-              <Icon name="send" className="text-[16px]" />
+              <span className='text-[var(--lp-primary)]'>{landingFooter.newsletterCta.label}</span>
+              <Icon name="send" className="text-[16px] text-[var(--lp-primary)]" />
             </a>
           </div>
         </div>
 
         <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-white/10 pt-6 text-xs text-[var(--lp-on-primary-muted)] md:flex-row">
           <p>
-            © {year} {name}. {landingFooter.copyrightSuffix}
+            © {year} DIUK Solution x {name}. {landingFooter.copyrightSuffix}
           </p>
           <div className="flex items-center gap-6">
             {landingFooter.values.map((value) => (

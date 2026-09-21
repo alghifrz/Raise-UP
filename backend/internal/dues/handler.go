@@ -31,6 +31,7 @@ func (h *Handler) RegisterRoutes(api *gin.RouterGroup, middlewares ...gin.Handle
 	group.POST("/periods", h.CreatePeriod)
 	group.GET("/periods/:id/summary", h.PeriodSummary)
 	group.GET("/periods/:id/status", h.ListResidentPaymentStatus)
+	group.POST("/periods/:id/remind-unpaid", h.SendUnpaidReminders)
 	group.GET("/periods/:id", h.GetPeriod)
 	group.PATCH("/periods/:id", h.UpdatePeriod)
 	group.DELETE("/periods/:id", h.DeletePeriod)
@@ -148,6 +149,16 @@ func (h *Handler) ListResidentPaymentStatus(c *gin.Context) {
 	response.JSONWithMeta(c, http.StatusOK, result.Items, result.Meta)
 }
 
+// SendUnpaidReminders handles POST /api/v1/dues/periods/:id/remind-unpaid.
+func (h *Handler) SendUnpaidReminders(c *gin.Context) {
+	result, err := h.service.SendUnpaidReminders(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	response.JSON(c, http.StatusOK, result)
+}
+
 // ListPayments handles GET /api/v1/dues/payments.
 func (h *Handler) ListPayments(c *gin.Context) {
 	page, pageSize, ok := parsePagination(c)
@@ -258,6 +269,8 @@ func (h *Handler) writeServiceError(c *gin.Context, err error) {
 		response.Conflict(c, "DUES_PERIOD_ALREADY_EXISTS", "Dues period already exists")
 	case errors.Is(err, ErrPaymentAlreadyExists):
 		response.Conflict(c, "DUES_PAYMENT_ALREADY_EXISTS", "Dues payment already exists for this period and resident")
+	case errors.Is(err, ErrReminderUnavailable):
+		response.Error(c, http.StatusServiceUnavailable, "WHATSAPP_UNAVAILABLE", "WhatsApp reminder service is unavailable")
 	default:
 		h.log.Error("dues handler error", "error", err)
 		response.Internal(c)

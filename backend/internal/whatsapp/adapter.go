@@ -30,11 +30,23 @@ func (m *MessengerAdapter) SendText(ctx context.Context, to, body string) (strin
 	if !m.Enabled() {
 		return "", ErrNotConfigured
 	}
-	result, err := m.client.SendText(ctx, to, body)
+	normalized, err := NormalizePhone(to)
+	if err != nil {
+		return "", err
+	}
+	result, err := m.client.SendText(ctx, normalized, body)
 	if err != nil {
 		return "", err
 	}
 	return result.MessageID, nil
+}
+
+// MarkAsRead marks an inbound WhatsApp message as read on Meta.
+func (m *MessengerAdapter) MarkAsRead(ctx context.Context, waMessageID string) error {
+	if !m.Enabled() {
+		return ErrNotConfigured
+	}
+	return m.client.MarkAsRead(ctx, waMessageID)
 }
 
 // Client returns the underlying Graph client (for notifications).

@@ -108,44 +108,18 @@ func (q *Queries) CountMyConversations(ctx context.Context, arg CountMyConversat
 	return column_1, err
 }
 
-const countMyTotalUnread = `-- name: CountMyTotalUnread :one
-SELECT COALESCE(SUM(per_conv.unread_count), 0)::bigint
-FROM (
-    SELECT (
-        SELECT COUNT(*)::bigint
-        FROM messages m
-        WHERE m.conversation_id = c.id
-          AND (
-              m.sender_kind <> 'USER'
-              OR m.sender_id IS DISTINCT FROM $1
-          )
-          AND (
-              me.user_id IS NULL
-              OR me.last_read_at IS NULL
-              OR m.created_at > me.last_read_at
-          )
-    ) AS unread_count
-    FROM conversations c
-    LEFT JOIN conversation_participants me
-        ON me.conversation_id = c.id AND me.user_id = $1
-    WHERE c.type = 'WHATSAPP' OR me.user_id IS NOT NULL
-) AS per_conv
-`
-
-func (q *Queries) CountMyTotalUnread(ctx context.Context, userID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMyTotalUnread, userID)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const countUnreadMessages = `-- name: CountUnreadMessages :one
 SELECT COUNT(*)::bigint
 FROM messages m
+INNER JOIN conversations c ON c.id = m.conversation_id
 WHERE m.conversation_id = $1
   AND (
-      m.sender_kind <> 'USER'
-      OR m.sender_id IS DISTINCT FROM $2
+      (c.type = 'WHATSAPP' AND m.sender_kind = 'CONTACT')
+      OR (
+          c.type <> 'WHATSAPP'
+          AND m.sender_kind = 'USER'
+          AND m.sender_id IS DISTINCT FROM $2
+      )
   )
   AND (
       NOT EXISTS (
@@ -401,6 +375,25 @@ func (q *Queries) GetConversationParticipant(ctx context.Context, arg GetConvers
 	return i, err
 }
 
+const getMaxOtherLastReadAt = `-- name: GetMaxOtherLastReadAt :one
+SELECT MAX(last_read_at)::timestamptz AS last_read_at
+FROM conversation_participants
+WHERE conversation_id = $1
+  AND user_id <> $2
+`
+
+type GetMaxOtherLastReadAtParams struct {
+	ConversationID pgtype.UUID `json:"conversation_id"`
+	UserID         pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetMaxOtherLastReadAt(ctx context.Context, arg GetMaxOtherLastReadAtParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getMaxOtherLastReadAt, arg.ConversationID, arg.UserID)
+	var last_read_at pgtype.Timestamptz
+	err := row.Scan(&last_read_at)
+	return last_read_at, err
+}
+
 const getMessageByID = `-- name: GetMessageByID :one
 SELECT id, conversation_id, sender_id, body, created_at, sender_kind, wa_message_id, wa_status
 FROM messages
@@ -590,8 +583,12 @@ SELECT
         FROM messages m
         WHERE m.conversation_id = c.id
           AND (
-              m.sender_kind <> 'USER'
-              OR m.sender_id IS DISTINCT FROM $1
+              (c.type = 'WHATSAPP' AND m.sender_kind = 'CONTACT')
+              OR (
+                  c.type <> 'WHATSAPP'
+                  AND m.sender_kind = 'USER'
+                  AND m.sender_id IS DISTINCT FROM $1
+              )
           )
           AND (me.last_read_at IS NULL OR m.created_at > me.last_read_at)
     ) AS unread_count

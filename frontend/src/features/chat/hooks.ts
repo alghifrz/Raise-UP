@@ -11,17 +11,22 @@ import {
   sendWhatsAppNotification,
 } from './api'
 import type {
+  ChatMessage,
   ContactFilters,
   ConversationFilters,
   CreateConversationRequest,
   MessageFilters,
+  MessageListResponse,
   SendMessageRequest,
   WhatsAppNotificationRequest,
 } from './types'
 
 export const chatQueryKey = ['chat'] as const
 
-const POLL_MS = 5_000
+/** Inbox / badge poll — keep list + unread badge on the same cadence. */
+const POLL_INBOX_MS = 2_500
+/** Open thread poll — slightly faster so inbound bubbles appear sooner. */
+const POLL_THREAD_MS = 2_000
 
 export function conversationsListQueryKey(filters: ConversationFilters) {
   return [...chatQueryKey, 'conversations', filters] as const
@@ -43,7 +48,10 @@ export function whatsappStatusQueryKey() {
   return [...chatQueryKey, 'whatsapp-status'] as const
 }
 
-/** Shared filters for sidebar unread badge (covers typical admin inbox size). */
+/**
+ * Shared filters for sidebar unread badge and the default (no-search) inbox.
+ * Same key → one network request, badge and list stay in sync.
+ */
 export const chatUnreadFilters: ConversationFilters = {
   page: 1,
   page_size: 100,
@@ -51,7 +59,7 @@ export const chatUnreadFilters: ConversationFilters = {
 }
 
 export function chatUnreadTotalQueryKey() {
-  return [...chatQueryKey, 'unread-total', chatUnreadFilters] as const
+  return conversationsListQueryKey(chatUnreadFilters)
 }
 
 export function useConversations(filters: ConversationFilters) {
@@ -59,19 +67,21 @@ export function useConversations(filters: ConversationFilters) {
     queryKey: conversationsListQueryKey(filters),
     queryFn: ({ signal }) => listConversations(filters, signal),
     placeholderData: (previous) => previous,
-    refetchInterval: POLL_MS,
+    refetchInterval: POLL_INBOX_MS,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   })
 }
 
-/** Total unread messages across conversations, for sidebar badge. */
+/** Total unread across conversations — shares cache with the default inbox list. */
 export function useChatUnreadTotal() {
   return useQuery({
-    queryKey: chatUnreadTotalQueryKey(),
-    queryFn: async ({ signal }) => {
-      const result = await listConversations(chatUnreadFilters, signal)
-      return result.items.reduce((sum, item) => sum + item.unread_count, 0)
-    },
-    refetchInterval: POLL_MS,
+    queryKey: conversationsListQueryKey(chatUnreadFilters),
+    queryFn: ({ signal }) => listConversations(chatUnreadFilters, signal),
+    select: (result) => result.items.reduce((sum, item) => sum + item.unread_count, 0),
+    refetchInterval: POLL_INBOX_MS,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   })
 }
 
@@ -80,7 +90,9 @@ export function useConversation(id: string | undefined) {
     queryKey: conversationDetailQueryKey(id ?? ''),
     queryFn: ({ signal }) => getConversation(id!, signal),
     enabled: Boolean(id),
-    refetchInterval: POLL_MS,
+    refetchInterval: POLL_THREAD_MS,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   })
 }
 
@@ -90,7 +102,9 @@ export function useMessages(conversationId: string | undefined, filters: Message
     queryFn: ({ signal }) => listMessages(conversationId!, filters, signal),
     enabled: Boolean(conversationId),
     placeholderData: (previous) => previous,
-    refetchInterval: POLL_MS,
+    refetchInterval: POLL_THREAD_MS,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   })
 }
 
@@ -136,6 +150,7 @@ export function useCreateConversation() {
 
 export function useSendMessage(conversationId: string | undefined) {
   const invalidate = useInvalidateChat()
+  const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: (payload: SendMessageRequest) => {
@@ -144,7 +159,22 @@ export function useSendMessage(conversationId: string | undefined) {
       }
       return sendMessage(conversationId, payload)
     },
-    onSuccess: async () => {
+    onSuccess: async (message: ChatMessage) => {
+      if (conversationId) {
+        const key = messagesListQueryKey(conversationId, { page: 1, page_size: 100 })
+        queryClient.setQueryData(key, (previous: MessageListResponse | undefined) => {
+          if (!previous) {
+            return previous
+          }
+          if (previous.items.some((item) => item.id === message.id)) {
+            return previous
+          }
+          return {
+            ...previous,
+            items: [message, ...previous.items],
+          }
+        })
+      }
       await invalidate(conversationId)
     },
   })

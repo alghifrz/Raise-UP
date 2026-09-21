@@ -21,15 +21,13 @@ export type GalleryListResponse = {
 }
 
 export type CreateGalleryRequest = {
-  image_url: string
-  storage_path?: string
+  image: File
   caption?: string
   sort_order?: number
 }
 
 export type UpdateGalleryRequest = {
-  image_url?: string
-  storage_path?: string
+  image?: File
   caption?: string
   sort_order?: number
 }

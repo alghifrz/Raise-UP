@@ -45,6 +45,7 @@ type Store interface {
 	ListMessages(ctx context.Context, conversationID string, limit, offset int32) ([]db.Message, error)
 	CountMessages(ctx context.Context, conversationID string) (int64, error)
 	CountUnread(ctx context.Context, conversationID, userID string) (int64, error)
+	GetMaxOtherLastReadAt(ctx context.Context, conversationID, userID string) (pgtype.Timestamptz, error)
 	MarkRead(ctx context.Context, conversationID, userID string, readAt pgtype.Timestamptz) (db.ConversationParticipant, error)
 	ListContacts(ctx context.Context, userID, search string, limit, offset int32) ([]db.ListChatContactsRow, error)
 	CountContacts(ctx context.Context, userID, search string) (int64, error)
@@ -53,10 +54,11 @@ type Store interface {
 	GetResidentByID(ctx context.Context, id string) (db.Resident, error)
 }
 
-// OutboundMessenger sends WhatsApp Cloud API messages.
+// OutboundMessenger sends WhatsApp Cloud API messages and read receipts.
 type OutboundMessenger interface {
 	Enabled() bool
 	SendText(ctx context.Context, to, body string) (waMessageID string, err error)
+	MarkAsRead(ctx context.Context, waMessageID string) error
 }
 
 // PhoneNormalizer normalizes phone numbers for WhatsApp.
@@ -67,10 +69,10 @@ type PhoneNormalizer interface {
 
 // Service implements chat use cases.
 type Service struct {
-	store      Store
-	messenger  OutboundMessenger
-	phones     PhoneNormalizer
-	now        func() time.Time
+	store     Store
+	messenger OutboundMessenger
+	phones    PhoneNormalizer
+	now       func() time.Time
 }
 
 // NewService creates a chat service.
@@ -352,9 +354,14 @@ func (s *Service) ListMessages(ctx context.Context, userID, conversationID strin
 		return nil, err
 	}
 
+	peerReadAt, err := s.store.GetMaxOtherLastReadAt(ctx, conversationID, userID)
+	if err != nil {
+		return nil, err
+	}
+
 	items := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		mapped, err := toAPIMessage(row)
+		mapped, err := toAPIMessage(row, messageIsRead(item.Type, row, userID, peerReadAt))
 		if err != nil {
 			return nil, err
 		}
@@ -423,7 +430,7 @@ func (s *Service) SendMessage(ctx context.Context, userID, conversationID string
 	if err != nil {
 		return nil, err
 	}
-	mapped, err := toAPIMessage(msg)
+	mapped, err := toAPIMessage(msg, false)
 	if err != nil {
 		return nil, err
 	}
@@ -431,6 +438,7 @@ func (s *Service) SendMessage(ctx context.Context, userID, conversationID string
 }
 
 // MarkRead marks a conversation as read for the current user.
+// For WHATSAPP threads it also notifies Meta so the contact sees blue ticks.
 func (s *Service) MarkRead(ctx context.Context, userID, conversationID string) (*ReadResult, error) {
 	item, err := s.store.GetConversationByID(ctx, conversationID)
 	if err != nil {
@@ -456,11 +464,36 @@ func (s *Service) MarkRead(ctx context.Context, userID, conversationID string) (
 		}
 	}
 
+	if item.Type == db.ConversationTypeWHATSAPP {
+		s.notifyWhatsAppRead(ctx, conversationID)
+	}
+
 	lastReadAt, err := formatTimestamptz(participant.LastReadAt)
 	if err != nil {
 		return nil, err
 	}
 	return &ReadResult{ConversationID: conversationID, LastReadAt: lastReadAt}, nil
+}
+
+// notifyWhatsAppRead marks the newest inbound contact message as read on Meta.
+func (s *Service) notifyWhatsAppRead(ctx context.Context, conversationID string) {
+	if s.messenger == nil || !s.messenger.Enabled() {
+		return
+	}
+	rows, err := s.store.ListMessages(ctx, conversationID, 50, 0)
+	if err != nil {
+		return
+	}
+	for _, row := range rows {
+		if row.SenderKind != db.MessageSenderKindCONTACT {
+			continue
+		}
+		if row.WaMessageID == nil || strings.TrimSpace(*row.WaMessageID) == "" {
+			continue
+		}
+		_ = s.messenger.MarkAsRead(ctx, strings.TrimSpace(*row.WaMessageID))
+		return
+	}
 }
 
 // ListContacts returns other admin users that can be chatted with.
@@ -495,23 +528,24 @@ func (s *Service) ListContacts(ctx context.Context, userID string, page, pageSiz
 }
 
 // IngestWhatsAppInbound upserts a WHATSAPP thread and stores an inbound contact message.
-func (s *Service) IngestWhatsAppInbound(ctx context.Context, phone, contactName, waMessageID, body string) error {
+// The bool is true when a new message row was written (false on empty/duplicate).
+func (s *Service) IngestWhatsAppInbound(ctx context.Context, phone, contactName, waMessageID, body string) (bool, error) {
 	if s.phones == nil {
-		return fmt.Errorf("%w: phone normalizer not configured", ErrInvalidRequest)
+		return false, fmt.Errorf("%w: phone normalizer not configured", ErrInvalidRequest)
 	}
 	digits, err := s.phones.Normalize(phone)
 	if err != nil {
-		return fmt.Errorf("%w: invalid phone", ErrInvalidRequest)
+		return false, fmt.Errorf("%w: invalid phone", ErrInvalidRequest)
 	}
 	body = strings.TrimSpace(body)
 	if body == "" {
-		return nil
+		return false, nil
 	}
 	if waMessageID != "" {
 		if _, err := s.store.GetMessageByWaMessageID(ctx, waMessageID); err == nil {
-			return nil
+			return false, nil
 		} else if !errors.Is(err, ErrNotFound) {
-			return err
+			return false, err
 		}
 	}
 
@@ -534,10 +568,10 @@ func (s *Service) IngestWhatsAppInbound(ctx context.Context, phone, contactName,
 	if errors.Is(err, ErrNotFound) {
 		conv, err = s.store.CreateWhatsAppConversation(ctx, "", digits, namePtr, residentUUID)
 		if err != nil {
-			return err
+			return false, err
 		}
 	} else if err != nil {
-		return err
+		return false, err
 	} else if namePtr != nil || residentUUID.Valid {
 		convID, _ := uuidutil.ToString(conv.ID)
 		_, _ = s.store.UpdateWhatsAppProfile(ctx, convID, namePtr, residentUUID)
@@ -545,7 +579,7 @@ func (s *Service) IngestWhatsAppInbound(ctx context.Context, phone, contactName,
 
 	convID, err := uuidutil.ToString(conv.ID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	var waIDPtr *string
@@ -565,6 +599,165 @@ func (s *Service) IngestWhatsAppInbound(ctx context.Context, phone, contactName,
 		sentAt,
 		previewText(body),
 	)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// WhatsAppMessageCount returns how many messages exist in the WA thread for phone.
+func (s *Service) WhatsAppMessageCount(ctx context.Context, phone string) (int64, error) {
+	if s.phones == nil {
+		return 0, fmt.Errorf("%w: phone normalizer not configured", ErrInvalidRequest)
+	}
+	digits, err := s.phones.Normalize(phone)
+	if err != nil {
+		return 0, fmt.Errorf("%w: invalid phone", ErrInvalidRequest)
+	}
+	conv, err := s.store.GetWhatsAppConversationByPhone(ctx, digits)
+	if errors.Is(err, ErrNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	convID, err := uuidutil.ToString(conv.ID)
+	if err != nil {
+		return 0, err
+	}
+	return s.store.CountMessages(ctx, convID)
+}
+
+// WhatsAppDisplayName resolves a friendly name for bot replies.
+// Registered resident data takes precedence over the WhatsApp profile name.
+func (s *Service) WhatsAppDisplayName(ctx context.Context, phone, fallback string) (string, error) {
+	if s.phones == nil {
+		return strings.TrimSpace(fallback), fmt.Errorf("%w: phone normalizer not configured", ErrInvalidRequest)
+	}
+	digits, err := s.phones.Normalize(phone)
+	if err != nil {
+		return strings.TrimSpace(fallback), fmt.Errorf("%w: invalid phone", ErrInvalidRequest)
+	}
+
+	if row, findErr := s.store.FindResidentByPhones(ctx, s.phones.MatchCandidates(digits)); findErr == nil && row.Name != "" {
+		return strings.TrimSpace(row.Name), nil
+	}
+
+	if conv, err := s.store.GetWhatsAppConversationByPhone(ctx, digits); err == nil {
+		if conv.WaContactName != nil && strings.TrimSpace(*conv.WaContactName) != "" {
+			return strings.TrimSpace(*conv.WaContactName), nil
+		}
+	}
+
+	if name := strings.TrimSpace(fallback); name != "" {
+		return name, nil
+	}
+	return "Warga", nil
+}
+
+// WhatsAppResidentIdentity resolves the registered resident behind a WhatsApp number.
+func (s *Service) WhatsAppResidentIdentity(ctx context.Context, phone string) (residentID, name, normalizedPhone string, found bool, err error) {
+	if s.phones == nil {
+		return "", "", "", false, fmt.Errorf("%w: phone normalizer not configured", ErrInvalidRequest)
+	}
+	digits, err := s.phones.Normalize(phone)
+	if err != nil {
+		return "", "", "", false, fmt.Errorf("%w: invalid phone", ErrInvalidRequest)
+	}
+	row, err := s.store.FindResidentByPhones(ctx, s.phones.MatchCandidates(digits))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return "", "", digits, false, nil
+		}
+		return "", "", digits, false, err
+	}
+	id, err := uuidutil.ToString(row.ID)
+	if err != nil {
+		return "", "", digits, false, err
+	}
+	return id, strings.TrimSpace(row.Name), strings.TrimSpace(row.Phone), true, nil
+}
+
+// Enabled reports whether system-originated WhatsApp sending is available.
+func (s *Service) Enabled() bool {
+	return s != nil && s.messenger != nil && s.messenger.Enabled()
+}
+
+// SendText sends a SYSTEM WhatsApp message, creating the inbox thread when needed.
+// It implements the announcement.OutboundMessenger shape without coupling packages.
+func (s *Service) SendText(ctx context.Context, phone, body string) (string, error) {
+	if s.phones == nil {
+		return "", fmt.Errorf("%w: phone normalizer not configured", ErrInvalidRequest)
+	}
+	if !s.Enabled() {
+		return "", fmt.Errorf("%w: WhatsApp is not configured", ErrInvalidRequest)
+	}
+
+	digits, err := s.phones.Normalize(phone)
+	if err != nil {
+		return "", fmt.Errorf("%w: invalid phone", ErrInvalidRequest)
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "", fmt.Errorf("%w: body is required", ErrInvalidRequest)
+	}
+	if utf8.RuneCountInString(body) > maxMessageBodyLen {
+		return "", fmt.Errorf("%w: body must be at most %d characters", ErrInvalidRequest, maxMessageBodyLen)
+	}
+
+	var namePtr *string
+	var residentUUID pgtype.UUID
+	if resident, findErr := s.store.FindResidentByPhones(ctx, s.phones.MatchCandidates(digits)); findErr == nil {
+		residentUUID = resident.ID
+		if name := strings.TrimSpace(resident.Name); name != "" {
+			namePtr = &name
+		}
+	}
+
+	conv, err := s.store.GetWhatsAppConversationByPhone(ctx, digits)
+	if errors.Is(err, ErrNotFound) {
+		conv, err = s.store.CreateWhatsAppConversation(ctx, "", digits, namePtr, residentUUID)
+		if err != nil {
+			return "", err
+		}
+	} else if err != nil {
+		return "", err
+	} else if namePtr != nil || residentUUID.Valid {
+		convID, _ := uuidutil.ToString(conv.ID)
+		_, _ = s.store.UpdateWhatsAppProfile(ctx, convID, namePtr, residentUUID)
+	}
+
+	convID, err := uuidutil.ToString(conv.ID)
+	if err != nil {
+		return "", err
+	}
+
+	waID, err := s.messenger.SendText(ctx, digits, body)
+	if err != nil {
+		return "", err
+	}
+	status := "accepted"
+	sentAt := timestamptz(s.now())
+	_, _, err = s.store.CreateMessage(
+		ctx,
+		convID,
+		pgtype.UUID{},
+		db.MessageSenderKindSYSTEM,
+		body,
+		&waID,
+		&status,
+		sentAt,
+		previewText(body),
+	)
+	if err != nil {
+		return "", err
+	}
+	return waID, nil
+}
+
+// SendBotReply sends an automated SYSTEM reply over WhatsApp and stores it in the thread.
+func (s *Service) SendBotReply(ctx context.Context, phone, body string) error {
+	_, err := s.SendText(ctx, phone, body)
 	return err
 }
 
@@ -764,7 +957,7 @@ func toAPIConversation(item db.Conversation, currentUserID string, participants 
 	}, nil
 }
 
-func toAPIMessage(item db.Message) (Message, error) {
+func toAPIMessage(item db.Message, isRead bool) (Message, error) {
 	id, err := uuidutil.ToString(item.ID)
 	if err != nil {
 		return Message{}, err
@@ -793,8 +986,37 @@ func toAPIMessage(item db.Message) (Message, error) {
 		Body:           item.Body,
 		WaMessageID:    item.WaMessageID,
 		WaStatus:       item.WaStatus,
+		IsRead:         isRead,
 		CreatedAt:      createdAt,
 	}, nil
+}
+
+func messageIsRead(
+	convType db.ConversationType,
+	msg db.Message,
+	viewerID string,
+	peerReadAt pgtype.Timestamptz,
+) bool {
+	if msg.SenderKind != db.MessageSenderKindUSER || !msg.SenderID.Valid {
+		return false
+	}
+	senderID, err := uuidutil.ToString(msg.SenderID)
+	if err != nil || senderID != viewerID {
+		return false
+	}
+
+	// WhatsApp delivery/read comes from Meta status webhooks.
+	if convType == db.ConversationTypeWHATSAPP {
+		if msg.WaStatus == nil {
+			return false
+		}
+		return strings.EqualFold(*msg.WaStatus, "read")
+	}
+
+	if !peerReadAt.Valid || !msg.CreatedAt.Valid {
+		return false
+	}
+	return !msg.CreatedAt.Time.After(peerReadAt.Time)
 }
 
 func displayName(

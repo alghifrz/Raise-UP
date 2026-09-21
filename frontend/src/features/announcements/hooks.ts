@@ -15,6 +15,7 @@ import type {
 } from './types'
 
 export const announcementsQueryKey = ['announcements'] as const
+const publicAnnouncementsQueryKey = ['public', 'announcements'] as const
 
 export function announcementsListQueryKey(filters: AnnouncementFilters) {
   return [...announcementsQueryKey, 'list', filters] as const
@@ -46,6 +47,7 @@ function useInvalidateAnnouncements() {
   return async (announcementId?: string) => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: announcementsQueryKey }),
+      queryClient.invalidateQueries({ queryKey: publicAnnouncementsQueryKey }),
       queryClient.invalidateQueries({ queryKey: dashboardSummaryQueryKey }),
       announcementId
         ? queryClient.invalidateQueries({ queryKey: announcementDetailQueryKey(announcementId) })

@@ -25,6 +25,7 @@ import {
   useDuesPeriod,
   useDuesPeriodStatus,
   useDuesPeriodSummary,
+  useSendUnpaidDuesReminders,
   useUpdateDuesPayment,
   useUpdateDuesPeriod,
 } from '../hooks'
@@ -66,6 +67,7 @@ export function DuesPeriodDetailPage() {
   const createPaymentMutation = useCreateDuesPayment()
   const updatePaymentMutation = useUpdateDuesPayment()
   const deletePaymentMutation = useDeleteDuesPayment()
+  const reminderMutation = useSendUnpaidDuesReminders()
 
   const [editPeriodOpen, setEditPeriodOpen] = useState(false)
   const [deletePeriodOpen, setDeletePeriodOpen] = useState(false)
@@ -74,6 +76,7 @@ export function DuesPeriodDetailPage() {
     payment: DuesPayment
   } | null>(null)
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null)
+  const [reminderOpen, setReminderOpen] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -209,7 +212,17 @@ export function DuesPeriodDetailPage() {
       ) : null}
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-[var(--color-ink)]">Status Pembayaran</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-[var(--color-ink)]">Status Pembayaran</h2>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setReminderOpen(true)}
+            disabled={summary?.unpaid_count === 0}
+          >
+            Kirim Reminder
+          </Button>
+        </div>
 
         <div className="grid gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-panel)] p-4 sm:grid-cols-2">
           <Input
@@ -398,6 +411,36 @@ export function DuesPeriodDetailPage() {
           />
         ) : null}
       </Modal>
+
+      <ConfirmDialog
+        open={reminderOpen}
+        title="Kirim reminder iuran?"
+        message={`Reminder WhatsApp akan dikirim ke ${summary?.unpaid_count ?? 0} warga yang belum membayar periode ini.`}
+        confirmLabel="Kirim reminder"
+        loading={reminderMutation.isPending}
+        onCancel={() => setReminderOpen(false)}
+        onConfirm={() => {
+          void (async () => {
+            setActionError(null)
+            try {
+              const result = await reminderMutation.mutateAsync(period.id)
+              setReminderOpen(false)
+              if (result.total === 0) {
+                setFeedback('Semua warga sudah membayar. Tidak ada reminder yang dikirim.')
+              } else if (result.failed === 0) {
+                setFeedback(`Reminder berhasil dikirim ke ${result.sent} warga.`)
+              } else {
+                setFeedback(
+                  `Reminder terkirim ${result.sent} dari ${result.total} warga (${result.failed} gagal).`,
+                )
+              }
+            } catch (error) {
+              setActionError(toDuesErrorMessage(error))
+              setReminderOpen(false)
+            }
+          })()
+        }}
+      />
 
       <ConfirmDialog
         open={deletePeriodOpen}

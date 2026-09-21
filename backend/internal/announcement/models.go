@@ -59,6 +59,14 @@ type Announcement struct {
 	CreatedAt    string                    `json:"created_at"`
 	UpdatedAt    string                    `json:"updated_at"`
 	RecipientIDs []string                  `json:"recipient_ids"`
+	Delivery     *DeliveryResult           `json:"delivery,omitempty"`
+}
+
+// DeliveryResult summarizes WhatsApp delivery attempts made during publish.
+type DeliveryResult struct {
+	Total  int `json:"total"`
+	Sent   int `json:"sent"`
+	Failed int `json:"failed"`
 }
 
 // AnnouncementSummary is used for list responses (no recipient IDs).

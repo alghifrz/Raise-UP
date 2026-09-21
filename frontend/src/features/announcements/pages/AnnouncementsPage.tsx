@@ -36,8 +36,6 @@ export function AnnouncementsPage() {
   const debouncedSearch = useDebouncedValue(searchInput, 300)
   const [status, setStatus] = useState<AnnouncementStatus | ''>('')
   const [visibility, setVisibility] = useState<AnnouncementVisibility | ''>('')
-  const [categoryInput, setCategoryInput] = useState('')
-  const debouncedCategory = useDebouncedValue(categoryInput, 300)
   const [page, setPage] = useState(1)
   const [createOpen, setCreateOpen] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -49,9 +47,9 @@ export function AnnouncementsPage() {
       search: debouncedSearch.trim(),
       status,
       visibility,
-      category: debouncedCategory.trim(),
+      category: '',
     }),
-    [page, debouncedSearch, status, visibility, debouncedCategory],
+    [page, debouncedSearch, status, visibility],
   )
 
   const { data, isLoading, isError, isFetching, refetch } = useAnnouncements(filters)
@@ -78,7 +76,7 @@ export function AnnouncementsPage() {
         </p>
       ) : null}
 
-      <div className="grid gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-panel)] p-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-panel)] p-4 sm:grid-cols-3">
         <Input
           name="search"
           label="Cari"
@@ -110,16 +108,6 @@ export function AnnouncementsPage() {
           }}
           options={ANNOUNCEMENT_VISIBILITY_OPTIONS}
           placeholder="Semua"
-        />
-        <Input
-          name="categoryFilter"
-          label="Kategori"
-          placeholder="Mis. Umum"
-          value={categoryInput}
-          onChange={(event) => {
-            setCategoryInput(event.target.value)
-            setPage(1)
-          }}
         />
       </div>
 
@@ -169,11 +157,6 @@ export function AnnouncementsPage() {
                     {row.title}
                   </Link>
                 ),
-              },
-              {
-                key: 'category',
-                header: 'Kategori',
-                render: (row) => row.category,
               },
               {
                 key: 'visibility',

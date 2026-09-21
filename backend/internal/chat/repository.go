@@ -477,6 +477,26 @@ func (r *Repository) CountUnread(ctx context.Context, conversationID, userID str
 	return total, nil
 }
 
+// GetMaxOtherLastReadAt returns the latest last_read_at among other participants.
+func (r *Repository) GetMaxOtherLastReadAt(ctx context.Context, conversationID, userID string) (pgtype.Timestamptz, error) {
+	pgConversationID, err := uuidutil.FromString(conversationID)
+	if err != nil {
+		return pgtype.Timestamptz{}, ErrInvalidRequest
+	}
+	pgUserID, err := uuidutil.FromString(userID)
+	if err != nil {
+		return pgtype.Timestamptz{}, ErrInvalidRequest
+	}
+	ts, err := r.q.GetMaxOtherLastReadAt(ctx, db.GetMaxOtherLastReadAtParams{
+		ConversationID: pgConversationID,
+		UserID:         pgUserID,
+	})
+	if err != nil {
+		return pgtype.Timestamptz{}, fmt.Errorf("get max other last read: %w", err)
+	}
+	return ts, nil
+}
+
 // MarkRead updates the user's last_read_at for a conversation.
 func (r *Repository) MarkRead(ctx context.Context, conversationID, userID string, readAt pgtype.Timestamptz) (db.ConversationParticipant, error) {
 	pgConversationID, err := uuidutil.FromString(conversationID)

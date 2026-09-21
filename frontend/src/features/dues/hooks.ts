@@ -10,6 +10,7 @@ import {
   getDuesPeriod,
   listDuesPeriodStatus,
   listDuesPeriods,
+  sendUnpaidDuesReminders,
   updateDuesPayment,
   updateDuesPeriod,
 } from './api'
@@ -74,6 +75,12 @@ export function useDuesPeriodStatus(id: string | undefined, filters: DuesPeriodS
     queryFn: ({ signal }) => listDuesPeriodStatus(id!, filters, signal),
     enabled: Boolean(id),
     placeholderData: (previous) => previous,
+  })
+}
+
+export function useSendUnpaidDuesReminders() {
+  return useMutation({
+    mutationFn: (periodId: string) => sendUnpaidDuesReminders(periodId),
   })
 }
 

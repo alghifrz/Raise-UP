@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { cn } from '../../../lib/utils'
 import type { AuthContextValue } from '../../auth/auth-context'
 import { useAuth } from '../../auth/useAuth'
@@ -13,6 +13,8 @@ type LandingNavProps = {
 }
 
 export function LandingNav({ siteName, contactHref }: LandingNavProps) {
+  const location = useLocation()
+  const isLandingPage = location.pathname === '/'
   const auth: AuthContextValue = useAuth()
   const { isAuthenticated } = auth
   const [scrolled, setScrolled] = useState(false)
@@ -72,7 +74,7 @@ export function LandingNav({ siteName, contactHref }: LandingNavProps) {
                 : 'h-20 border border-transparent bg-transparent px-0',
             )}
           >
-            <a href="#beranda" className="group flex min-w-0 items-center gap-3">
+            <a href={isLandingPage ? '#beranda' : '/'} className="group flex min-w-0 items-center gap-3">
               <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden">
                 <img
                   src={landingAssets.logo}
@@ -95,11 +97,11 @@ export function LandingNav({ siteName, contactHref }: LandingNavProps) {
               aria-label="Navigasi utama"
             >
               {landingNavLinks.map((link) => {
-                const isActive = active === link.href
+                const isActive = isLandingPage && active === link.href
                 return (
                   <a
                     key={link.href}
-                    href={link.href}
+                    href={isLandingPage ? link.href : `/${link.href}`}
                     className={cn(
                       'relative z-10 rounded-full px-3.5 py-2 text-[13px] font-semibold transition-colors xl:px-4',
                       isActive ? 'text-[var(--lp-primary)]' : 'text-[var(--lp-muted)] hover:text-[var(--lp-ink)]',
@@ -182,11 +184,11 @@ export function LandingNav({ siteName, contactHref }: LandingNavProps) {
               </div>
               <nav className="flex flex-col gap-1 p-3" aria-label="Navigasi mobile">
                 {landingNavLinks.map((link, index) => {
-                  const isActive = active === link.href
+                  const isActive = isLandingPage && active === link.href
                   return (
                     <motion.a
                       key={link.href}
-                      href={link.href}
+                      href={isLandingPage ? link.href : `/${link.href}`}
                       className={cn(
                         'flex items-center justify-between rounded-2xl px-4 py-3.5 text-[15px] font-semibold transition-colors',
                         isActive

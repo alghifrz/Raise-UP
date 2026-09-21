@@ -14,6 +14,7 @@ import { FinancePage } from '../features/finance/pages/FinancePage'
 import { FinanceTransactionDetailPage } from '../features/finance/pages/FinanceTransactionDetailPage'
 import { GalleryPage } from '../features/gallery/pages/GalleryPage'
 import { LandingPage } from '../features/landing/pages/LandingPage'
+import { PublicAnnouncementPage } from '../features/landing/pages/PublicAnnouncementPage'
 import { ResidentsPage } from '../features/residents/pages/ResidentsPage'
 import { SiteSettingsPage } from '../features/site-settings/pages/SiteSettingsPage'
 import { VillagePage } from '../features/village/pages/VillagePage'
@@ -25,6 +26,7 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
+      <Route path="/pengumuman/:id" element={<PublicAnnouncementPage />} />
       <Route path="/login" element={<LoginPage />} />
 
       <Route element={<ProtectedRoute />}>

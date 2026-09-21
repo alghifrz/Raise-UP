@@ -34,6 +34,12 @@ export type DuesPeriodSummary = {
   outstanding_total: number
 }
 
+export type DuesReminderResult = {
+  total: number
+  sent: number
+  failed: number
+}
+
 export type DuesPaymentStatusValue = 'PAID' | 'UNPAID'
 
 export type ResidentPaymentStatus = {

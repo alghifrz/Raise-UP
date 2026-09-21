@@ -41,7 +41,7 @@ export function AnnouncementDetailPage() {
     queries: (data?.recipient_ids ?? []).map((recipientId) => ({
       queryKey: residentDetailQueryKey(recipientId),
       queryFn: ({ signal }: { signal?: AbortSignal }) => getResident(recipientId, signal),
-      enabled: Boolean(data?.visibility === 'PRIVATE' && data.recipient_ids.length > 0),
+      enabled: Boolean(data && data.recipient_ids.length > 0),
     })),
   })
 
@@ -73,8 +73,19 @@ export function AnnouncementDetailPage() {
   async function handlePublish() {
     setActionError(null)
     try {
-      await publishMutation.mutateAsync(announcement.id)
-      setFeedback('Pengumuman berhasil diterbitkan.')
+      const published = await publishMutation.mutateAsync(announcement.id)
+      const delivery = published.delivery
+      if (!delivery || delivery.total === 0) {
+        setFeedback('Pengumuman berhasil diterbitkan. Tidak ada penerima WhatsApp.')
+      } else if (delivery.failed === 0) {
+        setFeedback(
+          `Pengumuman berhasil diterbitkan dan dikirim ke ${delivery.sent} penerima WhatsApp.`,
+        )
+      } else {
+        setFeedback(
+          `Pengumuman diterbitkan. WhatsApp terkirim ${delivery.sent} dari ${delivery.total} penerima (${delivery.failed} gagal).`,
+        )
+      }
     } catch (err) {
       setActionError(toAnnouncementErrorMessage(err))
     }
@@ -142,10 +153,6 @@ export function AnnouncementDetailPage() {
               </dd>
             </div>
             <div>
-              <dt className="text-[var(--color-muted)]">Kategori</dt>
-              <dd className="mt-1 font-medium">{announcement.category}</dd>
-            </div>
-            <div>
               <dt className="text-[var(--color-muted)]">Penulis</dt>
               <dd className="mt-1 font-medium" title={announcement.author_id}>
                 {formatAuthorLabel(announcement.author_id)}
@@ -170,12 +177,6 @@ export function AnnouncementDetailPage() {
 
         <Card title="Konten" className="lg:col-span-2">
           <div className="space-y-4">
-            {announcement.excerpt ? (
-              <div>
-                <h3 className="text-sm font-medium text-[var(--color-muted)]">Ringkasan</h3>
-                <p className="mt-1 text-sm text-[var(--color-ink)]">{announcement.excerpt}</p>
-              </div>
-            ) : null}
             <div>
               <h3 className="text-sm font-medium text-[var(--color-muted)]">Isi</h3>
               <p className="mt-1 whitespace-pre-wrap rounded-2xl border border-[var(--color-line)] bg-[var(--color-accent-soft)] px-3 py-3 text-sm">
@@ -199,40 +200,38 @@ export function AnnouncementDetailPage() {
         </Card>
       </div>
 
-      {announcement.visibility === 'PRIVATE' ? (
-        <Card title="Penerima">
-          {announcement.recipient_ids.length === 0 ? (
-            <p className="text-sm text-[var(--color-muted)]">Tidak ada penerima.</p>
-          ) : (
-            <ul className="space-y-2">
-              {announcement.recipient_ids.map((recipientId, index) => {
-                const resident = recipientQueries[index]?.data
-                return (
-                  <li
-                    key={recipientId}
-                    className="rounded-md border border-[var(--color-line)] px-3 py-2 text-sm"
-                  >
-                    {resident ? (
-                      <span>
-                        {resident.name} · {resident.phone}
-                      </span>
-                    ) : (
-                      <span title={recipientId}>
-                        {recipientQueries[index]?.isLoading
-                          ? 'Memuat…'
-                          : `Warga ${formatAuthorLabel(recipientId)}`}
-                      </span>
-                    )}{' '}
-                    <Link className="text-[var(--color-accent)] hover:underline" to="/residents">
-                      Lihat warga
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </Card>
-      ) : null}
+      <Card title="Penerima">
+        {announcement.recipient_ids.length === 0 ? (
+          <p className="text-sm text-[var(--color-muted)]">Tidak ada penerima tercatat.</p>
+        ) : (
+          <ul className="space-y-2">
+            {announcement.recipient_ids.map((recipientId, index) => {
+              const resident = recipientQueries[index]?.data
+              return (
+                <li
+                  key={recipientId}
+                  className="rounded-md border border-[var(--color-line)] px-3 py-2 text-sm"
+                >
+                  {resident ? (
+                    <span>
+                      {resident.name} · {resident.phone}
+                    </span>
+                  ) : (
+                    <span title={recipientId}>
+                      {recipientQueries[index]?.isLoading
+                        ? 'Memuat…'
+                        : `Warga ${formatAuthorLabel(recipientId)}`}
+                    </span>
+                  )}{' '}
+                  <Link className="text-[var(--color-accent)] hover:underline" to="/residents">
+                    Lihat warga
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </Card>
 
       <Modal
         open={editOpen}

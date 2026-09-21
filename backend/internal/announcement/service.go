@@ -15,6 +15,7 @@ const (
 	defaultPage     = 1
 	defaultPageSize = 20
 	maxPageSize     = 100
+	defaultCategory = "UMUM"
 )
 
 // Store is the persistence interface used by Service.
@@ -34,10 +35,17 @@ type ResidentReader interface {
 	GetByID(ctx context.Context, id string) (db.Resident, error)
 }
 
+// OutboundMessenger sends announcement text to a WhatsApp number.
+type OutboundMessenger interface {
+	Enabled() bool
+	SendText(ctx context.Context, to, body string) (messageID string, err error)
+}
+
 // Service implements announcement use cases.
 type Service struct {
 	store     Store
 	residents ResidentReader
+	messenger OutboundMessenger
 	now       func() time.Time
 }
 
@@ -48,6 +56,11 @@ func NewService(store Store, residents ResidentReader) *Service {
 		residents: residents,
 		now:       func() time.Time { return time.Now().UTC() },
 	}
+}
+
+// SetMessenger enables WhatsApp delivery when an announcement is published.
+func (s *Service) SetMessenger(messenger OutboundMessenger) {
+	s.messenger = messenger
 }
 
 // List returns a paginated filtered announcement list (without recipient IDs).
@@ -118,12 +131,9 @@ func (s *Service) Get(ctx context.Context, id string) (*Announcement, error) {
 		return nil, err
 	}
 
-	recipientIDs := []string{}
-	if item.Visibility == db.AnnouncementVisibilityPRIVATE {
-		recipientIDs, err = s.store.ListRecipientIDs(ctx, id)
-		if err != nil {
-			return nil, err
-		}
+	recipientIDs, err := s.store.ListRecipientIDs(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 
 	mapped, err := toAPIAnnouncement(item, recipientIDs, true)
@@ -165,6 +175,33 @@ func (s *Service) Create(ctx context.Context, authorID string, req CreateRequest
 		return nil, err
 	}
 	return &mapped, nil
+}
+
+func (s *Service) deliverWhatsApp(ctx context.Context, title, body string, recipientIDs []string) *DeliveryResult {
+	if len(recipientIDs) == 0 {
+		return &DeliveryResult{}
+	}
+
+	result := &DeliveryResult{Total: len(recipientIDs)}
+	if s.messenger == nil || !s.messenger.Enabled() {
+		result.Failed = result.Total
+		return result
+	}
+
+	message := fmt.Sprintf("📢 *%s*\n\n%s", strings.TrimSpace(title), strings.TrimSpace(body))
+	for _, residentID := range recipientIDs {
+		resident, err := s.residents.GetByID(ctx, residentID)
+		if err != nil || strings.TrimSpace(resident.Phone) == "" {
+			result.Failed++
+			continue
+		}
+		if _, err := s.messenger.SendText(ctx, resident.Phone, message); err != nil {
+			result.Failed++
+			continue
+		}
+		result.Sent++
+	}
+	return result
 }
 
 // Update applies a partial content/visibility/recipient update.
@@ -230,30 +267,15 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*An
 	replace := false
 	recipients := currentRecipients
 
-	switch {
-	case visibility == db.AnnouncementVisibilityPUBLIC:
-		if req.RecipientIDs != nil && len(*req.RecipientIDs) > 0 {
-			return nil, fmt.Errorf("%w: public announcement cannot have recipients", ErrInvalidRequest)
+	if req.RecipientIDs != nil {
+		normalized, err := s.normalizeRecipients(ctx, *req.RecipientIDs, true)
+		if err != nil {
+			return nil, err
 		}
-		if existing.Visibility == db.AnnouncementVisibilityPRIVATE || len(currentRecipients) > 0 {
-			replace = true
-			recipients = []string{}
-		}
-		if req.RecipientIDs != nil {
-			replace = true
-			recipients = []string{}
-		}
-	case visibility == db.AnnouncementVisibilityPRIVATE:
-		if req.RecipientIDs != nil {
-			normalized, err := s.normalizeRecipients(ctx, *req.RecipientIDs, true)
-			if err != nil {
-				return nil, err
-			}
-			replace = true
-			recipients = normalized
-		} else if existing.Visibility == db.AnnouncementVisibilityPUBLIC {
-			return nil, ErrRecipientRequired
-		}
+		replace = true
+		recipients = normalized
+	} else if visibility == db.AnnouncementVisibilityPRIVATE && len(currentRecipients) == 0 {
+		return nil, ErrRecipientRequired
 	}
 
 	pgID, err := uuidutil.FromString(id)
@@ -280,10 +302,6 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (*An
 			return nil, err
 		}
 	}
-	if item.Visibility == db.AnnouncementVisibilityPUBLIC {
-		recipients = []string{}
-	}
-
 	mapped, err := toAPIAnnouncement(item, recipients, true)
 	if err != nil {
 		return nil, err
@@ -317,18 +335,16 @@ func (s *Service) UpdateStatus(ctx context.Context, id, statusRaw string) (*Anno
 		return nil, err
 	}
 
-	recipients := []string{}
-	if item.Visibility == db.AnnouncementVisibilityPRIVATE {
-		recipients, err = s.store.ListRecipientIDs(ctx, id)
-		if err != nil {
-			return nil, err
-		}
+	recipients, err := s.store.ListRecipientIDs(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 
 	mapped, err := toAPIAnnouncement(item, recipients, true)
 	if err != nil {
 		return nil, err
 	}
+	mapped.Delivery = s.deliverWhatsApp(ctx, mapped.Title, mapped.Body, recipients)
 	return &mapped, nil
 }
 
@@ -357,15 +373,11 @@ func (s *Service) validateCreate(ctx context.Context, req CreateRequest) (string
 		return "", "", "", "", "", nil, nil, fmt.Errorf("%w: body is required", ErrInvalidRequest)
 	}
 	if category == "" {
-		return "", "", "", "", "", nil, nil, fmt.Errorf("%w: category is required", ErrInvalidRequest)
+		category = defaultCategory
 	}
 	visibility, err := parseVisibility(visibilityRaw)
 	if err != nil {
 		return "", "", "", "", "", nil, nil, err
-	}
-
-	if visibility == db.AnnouncementVisibilityPUBLIC && len(req.RecipientIDs) > 0 {
-		return "", "", "", "", "", nil, nil, fmt.Errorf("%w: public announcement cannot have recipients", ErrInvalidRequest)
 	}
 
 	var thumbnail *string
@@ -376,6 +388,8 @@ func (s *Service) validateCreate(ctx context.Context, req CreateRequest) (string
 		}
 	}
 
+	// Keep legacy public announcements without recipients valid; the current UI
+	// always sends explicit recipients. Private announcements still require them.
 	requireRecipients := visibility == db.AnnouncementVisibilityPRIVATE
 	recipients, err := s.normalizeRecipients(ctx, req.RecipientIDs, requireRecipients)
 	if err != nil {

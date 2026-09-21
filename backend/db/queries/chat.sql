@@ -74,8 +74,12 @@ SELECT
         FROM messages m
         WHERE m.conversation_id = c.id
           AND (
-              m.sender_kind <> 'USER'
-              OR m.sender_id IS DISTINCT FROM sqlc.arg(user_id)
+              (c.type = 'WHATSAPP' AND m.sender_kind = 'CONTACT')
+              OR (
+                  c.type <> 'WHATSAPP'
+                  AND m.sender_kind = 'USER'
+                  AND m.sender_id IS DISTINCT FROM sqlc.arg(user_id)
+              )
           )
           AND (me.last_read_at IS NULL OR m.created_at > me.last_read_at)
     ) AS unread_count
@@ -198,6 +202,12 @@ WHERE conversation_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(limit_count) OFFSET sqlc.arg(offset_count);
 
+-- name: GetMaxOtherLastReadAt :one
+SELECT MAX(last_read_at)::timestamptz AS last_read_at
+FROM conversation_participants
+WHERE conversation_id = sqlc.arg(conversation_id)
+  AND user_id <> sqlc.arg(user_id);
+
 -- name: CountMessagesByConversation :one
 SELECT COUNT(*)::bigint
 FROM messages
@@ -206,10 +216,15 @@ WHERE conversation_id = $1;
 -- name: CountUnreadMessages :one
 SELECT COUNT(*)::bigint
 FROM messages m
+INNER JOIN conversations c ON c.id = m.conversation_id
 WHERE m.conversation_id = sqlc.arg(conversation_id)
   AND (
-      m.sender_kind <> 'USER'
-      OR m.sender_id IS DISTINCT FROM sqlc.arg(user_id)
+      (c.type = 'WHATSAPP' AND m.sender_kind = 'CONTACT')
+      OR (
+          c.type <> 'WHATSAPP'
+          AND m.sender_kind = 'USER'
+          AND m.sender_id IS DISTINCT FROM sqlc.arg(user_id)
+      )
   )
   AND (
       NOT EXISTS (
