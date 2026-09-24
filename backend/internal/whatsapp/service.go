@@ -31,8 +31,9 @@ type Service struct {
 }
 
 type configView struct {
-	VerifyToken string
-	AppSecret   string
+	VerifyToken   string
+	AppSecret     string
+	PhoneNumberID string
 }
 
 // NewService creates a WhatsApp application service.
@@ -46,8 +47,9 @@ func NewService(cfg config.WhatsAppConfig, messenger *MessengerAdapter, inbox In
 	}
 	return &Service{
 		cfg: configView{
-			VerifyToken: cfg.VerifyToken,
-			AppSecret:   cfg.AppSecret,
+			VerifyToken:   cfg.VerifyToken,
+			AppSecret:     cfg.AppSecret,
+			PhoneNumberID: strings.TrimSpace(cfg.PhoneNumberID),
 		},
 		client:  client,
 		inbox:   inbox,
@@ -145,6 +147,9 @@ func (s *Service) ProcessWebhookPayload(ctx context.Context, payload *WebhookPay
 	for _, entry := range payload.Entry {
 		for _, change := range entry.Changes {
 			value := change.Value
+			if !s.acceptsPhoneNumber(value.Metadata.PhoneNumberID) {
+				continue
+			}
 			contactsByWaID := map[string]string{}
 			for _, c := range value.Contacts {
 				contactsByWaID[c.WaID] = c.Profile.Name
@@ -179,4 +184,13 @@ func (s *Service) ProcessWebhookPayload(ctx context.Context, payload *WebhookPay
 		}
 	}
 	return nil
+}
+
+// acceptsPhoneNumber keeps only webhook events for the configured Cloud API number.
+func (s *Service) acceptsPhoneNumber(incoming string) bool {
+	want := strings.TrimSpace(s.cfg.PhoneNumberID)
+	if want == "" {
+		return true
+	}
+	return strings.TrimSpace(incoming) == want
 }
