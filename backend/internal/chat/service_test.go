@@ -623,7 +623,7 @@ func TestWhatsAppDisplayNameUsesResidentOrUnknown(t *testing.T) {
 	if got := byID[knownConvID]; got != "User (alghif)" {
 		t.Fatalf("known resident display name: got %q", got)
 	}
-	if got := byID[unknownConvID]; got != "User (belum dikenal)" {
+	if got := byID[unknownConvID]; got != "User (belum dikenali)" {
 		t.Fatalf("unknown resident display name: got %q", got)
 	}
 
@@ -633,5 +633,47 @@ func TestWhatsAppDisplayNameUsesResidentOrUnknown(t *testing.T) {
 	}
 	if detail.DisplayName != "User (alghif)" {
 		t.Fatalf("get known display name: got %q", detail.DisplayName)
+	}
+}
+
+func TestWhatsAppDisplayNameDoesNotDuplicateResidentName(t *testing.T) {
+	store := newMemoryStore()
+	adminID := uuid.New().String()
+	store.addUser(adminID, "Admin", "admin@example.com")
+
+	residentID := uuid.New()
+	residentPg, _ := uuidutil.FromString(residentID.String())
+	store.residents[residentID.String()] = db.Resident{
+		ID:   residentPg,
+		Name: "Tes Warga",
+	}
+
+	convID := uuid.New().String()
+	convPg, _ := uuidutil.FromString(convID)
+	adminPg, _ := uuidutil.FromString(adminID)
+	copied := "Tes Warga"
+	phone := "6281234567890"
+	now := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	store.conversations[convID] = db.Conversation{
+		ID:             convPg,
+		Type:           db.ConversationTypeWHATSAPP,
+		CreatedBy:      adminPg,
+		WaContactName:  &copied,
+		WaContactPhone: &phone,
+		ResidentID:     residentPg,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	store.participants[convID] = map[string]db.ConversationParticipant{
+		adminID: {ConversationID: convPg, UserID: adminPg, LastReadAt: now},
+	}
+
+	svc := newTestService(store)
+	detail, err := svc.GetConversation(context.Background(), adminID, convID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if detail.DisplayName != "6281234567890 (Tes Warga)" {
+		t.Fatalf("expected phone + resident label, got %q", detail.DisplayName)
 	}
 }

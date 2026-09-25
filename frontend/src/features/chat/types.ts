@@ -126,6 +126,7 @@ export type WhatsAppNotificationResult = {
 
 export type WhatsAppStatus = {
   enabled: boolean
+  bot_enabled: boolean
 }
 
 export function initialsFromName(name: string): string {

@@ -105,6 +105,13 @@ export function getWhatsAppStatus(signal?: AbortSignal): Promise<WhatsAppStatus>
   return apiRequest<WhatsAppStatus>('/api/v1/whatsapp/status', { signal })
 }
 
+export function updateWhatsAppBot(enabled: boolean): Promise<WhatsAppStatus> {
+  return apiRequest<WhatsAppStatus>('/api/v1/whatsapp/bot', {
+    method: 'PATCH',
+    body: { enabled },
+  })
+}
+
 export function sendWhatsAppNotification(
   payload: WhatsAppNotificationRequest,
 ): Promise<WhatsAppNotificationResult> {

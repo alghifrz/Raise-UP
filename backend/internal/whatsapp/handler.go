@@ -39,6 +39,7 @@ func (h *Handler) RegisterRoutes(api *gin.RouterGroup, middlewares ...gin.Handle
 	group.Use(middlewares...)
 	group.POST("/notifications", h.SendNotification)
 	group.GET("/status", h.Status)
+	group.PATCH("/bot", h.UpdateBot)
 }
 
 // Verify handles GET /api/v1/webhooks/whatsapp (Meta challenge).
@@ -110,16 +111,44 @@ func (h *Handler) SendNotification(c *gin.Context) {
 
 // Status handles GET /api/v1/whatsapp/status.
 func (h *Handler) Status(c *gin.Context) {
-	enabled := h.service != nil && h.service.Enabled()
-	response.JSON(c, http.StatusOK, gin.H{
-		"enabled": enabled,
-	})
+	if h.service == nil {
+		response.JSON(c, http.StatusOK, Status{})
+		return
+	}
+	response.JSON(c, http.StatusOK, h.service.CurrentStatus(c.Request.Context()))
+}
+
+type updateBotRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
+// UpdateBot handles PATCH /api/v1/whatsapp/bot.
+func (h *Handler) UpdateBot(c *gin.Context) {
+	if h.service == nil {
+		response.Error(c, http.StatusServiceUnavailable, "WHATSAPP_DISABLED", "WhatsApp is not configured")
+		return
+	}
+
+	var req updateBotRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		response.BadRequest(c, "enabled is required")
+		return
+	}
+
+	status, err := h.service.SetBotEnabled(c.Request.Context(), *req.Enabled)
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	response.JSON(c, http.StatusOK, status)
 }
 
 func (h *Handler) writeServiceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrNotConfigured):
 		response.Error(c, http.StatusServiceUnavailable, "WHATSAPP_DISABLED", "WhatsApp is not configured")
+	case errors.Is(err, ErrNotFound):
+		response.Error(c, http.StatusNotFound, "WHATSAPP_SETTINGS_NOT_FOUND", "WhatsApp settings were not found")
 	case errors.Is(err, ErrInvalidRequest):
 		message := err.Error()
 		message = strings.TrimPrefix(message, ErrInvalidRequest.Error()+": ")

@@ -22,12 +22,13 @@ type AutoReplier interface {
 
 // Service handles notifications and webhook processing.
 type Service struct {
-	cfg     configView
-	client  *Client
-	inbox   Inbox
-	bot     AutoReplier
-	log     *slog.Logger
-	enabled bool
+	cfg      configView
+	client   *Client
+	inbox    Inbox
+	bot      AutoReplier
+	settings SettingsStore
+	log      *slog.Logger
+	enabled  bool
 }
 
 type configView struct {
@@ -37,7 +38,7 @@ type configView struct {
 }
 
 // NewService creates a WhatsApp application service.
-func NewService(cfg config.WhatsAppConfig, messenger *MessengerAdapter, inbox Inbox, bot AutoReplier, log *slog.Logger) *Service {
+func NewService(cfg config.WhatsAppConfig, messenger *MessengerAdapter, inbox Inbox, bot AutoReplier, settings SettingsStore, log *slog.Logger) *Service {
 	var client *Client
 	if messenger != nil {
 		client = messenger.Client()
@@ -51,11 +52,12 @@ func NewService(cfg config.WhatsAppConfig, messenger *MessengerAdapter, inbox In
 			AppSecret:     cfg.AppSecret,
 			PhoneNumberID: strings.TrimSpace(cfg.PhoneNumberID),
 		},
-		client:  client,
-		inbox:   inbox,
-		bot:     bot,
-		log:     log,
-		enabled: cfg.Enabled,
+		client:   client,
+		inbox:    inbox,
+		bot:      bot,
+		settings: settings,
+		log:      log,
+		enabled:  cfg.Enabled,
 	}
 }
 
@@ -170,7 +172,7 @@ func (s *Service) ProcessWebhookPayload(ctx context.Context, payload *WebhookPay
 				if err != nil {
 					return err
 				}
-				if ingested && s.bot != nil {
+				if ingested && s.bot != nil && s.isBotEnabled(ctx) {
 					if botErr := s.bot.HandleInbound(ctx, msg.From, name, msg.ID, body); botErr != nil {
 						s.log.Error("whatsapp bot reply failed", "error", botErr, "from", msg.From)
 					}
@@ -184,6 +186,47 @@ func (s *Service) ProcessWebhookPayload(ctx context.Context, payload *WebhookPay
 		}
 	}
 	return nil
+}
+
+// Status describes Cloud API readiness and the runtime chatbot toggle.
+type Status struct {
+	Enabled    bool `json:"enabled"`
+	BotEnabled bool `json:"bot_enabled"`
+}
+
+// CurrentStatus returns the admin-visible WhatsApp status.
+func (s *Service) CurrentStatus(ctx context.Context) Status {
+	return Status{
+		Enabled:    s.Enabled(),
+		BotEnabled: s.isBotEnabled(ctx),
+	}
+}
+
+// SetBotEnabled persists the chatbot toggle.
+func (s *Service) SetBotEnabled(ctx context.Context, enabled bool) (Status, error) {
+	if s.settings == nil {
+		return Status{}, ErrNotFound
+	}
+	botEnabled, err := s.settings.SetBotEnabled(ctx, enabled)
+	if err != nil {
+		return Status{}, err
+	}
+	return Status{Enabled: s.Enabled(), BotEnabled: botEnabled}, nil
+}
+
+func (s *Service) isBotEnabled(ctx context.Context) bool {
+	if s == nil {
+		return false
+	}
+	if s.settings == nil {
+		return true
+	}
+	enabled, err := s.settings.BotEnabled(ctx)
+	if err != nil {
+		s.log.Error("whatsapp bot setting lookup failed", "error", err)
+		return false
+	}
+	return enabled
 }
 
 // acceptsPhoneNumber keeps only webhook events for the configured Cloud API number.

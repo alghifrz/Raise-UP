@@ -9,6 +9,7 @@ import {
   markConversationRead,
   sendMessage,
   sendWhatsAppNotification,
+  updateWhatsAppBot,
 } from './api'
 import type {
   ChatMessage,
@@ -121,6 +122,17 @@ export function useWhatsAppStatus() {
   return useQuery({
     queryKey: whatsappStatusQueryKey(),
     queryFn: ({ signal }) => getWhatsAppStatus(signal),
+  })
+}
+
+export function useUpdateWhatsAppBot() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (enabled: boolean) => updateWhatsAppBot(enabled),
+    onSuccess: (status) => {
+      queryClient.setQueryData(whatsappStatusQueryKey(), status)
+    },
   })
 }
 

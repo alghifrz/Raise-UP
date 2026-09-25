@@ -309,14 +309,8 @@ func (s *Service) createWhatsApp(ctx context.Context, userID, phone, contactName
 			return nil, fmt.Errorf("%w: invalid resident_id", ErrInvalidRequest)
 		}
 		residentUUID = pgID
-	} else {
-		if row, findErr := s.store.FindResidentByPhones(ctx, s.phones.MatchCandidates(digits)); findErr == nil {
-			residentUUID = row.ID
-			if namePtr == nil && row.Name != "" {
-				n := row.Name
-				namePtr = &n
-			}
-		}
+	} else if row, findErr := s.store.FindResidentByPhones(ctx, s.phones.MatchCandidates(digits)); findErr == nil {
+		residentUUID = row.ID
 	}
 
 	created, err := s.store.CreateWhatsAppConversation(ctx, userID, digits, namePtr, residentUUID)
@@ -558,10 +552,6 @@ func (s *Service) IngestWhatsAppInbound(ctx context.Context, phone, contactName,
 	var residentUUID pgtype.UUID
 	if row, findErr := s.store.FindResidentByPhones(ctx, s.phones.MatchCandidates(digits)); findErr == nil {
 		residentUUID = row.ID
-		if namePtr == nil && row.Name != "" {
-			n := row.Name
-			namePtr = &n
-		}
 	}
 
 	conv, err := s.store.GetWhatsAppConversationByPhone(ctx, digits)
@@ -1035,16 +1025,33 @@ func displayName(
 		}
 		return "Grup"
 	case db.ConversationTypeWHATSAPP:
-		primary := "WhatsApp"
-		if waName != nil && strings.TrimSpace(*waName) != "" {
-			primary = strings.TrimSpace(*waName)
-		} else if waPhone != nil && strings.TrimSpace(*waPhone) != "" {
-			primary = strings.TrimSpace(*waPhone)
+		resident := ""
+		if residentName != nil {
+			resident = strings.TrimSpace(*residentName)
 		}
-		if residentName != nil && strings.TrimSpace(*residentName) != "" {
-			return primary + " (" + strings.TrimSpace(*residentName) + ")"
+		wa := ""
+		if waName != nil {
+			wa = strings.TrimSpace(*waName)
 		}
-		return primary + " (belum dikenal)"
+		phone := ""
+		if waPhone != nil {
+			phone = strings.TrimSpace(*waPhone)
+		}
+
+		// Keep the WhatsApp profile name and the residents-table name distinct.
+		// If they were previously copied into each other, fall back to the phone.
+		primary := wa
+		if primary == "" || (resident != "" && strings.EqualFold(primary, resident)) {
+			if phone != "" {
+				primary = phone
+			} else {
+				primary = "WhatsApp"
+			}
+		}
+		if resident != "" {
+			return primary + " (" + resident + ")"
+		}
+		return primary + " (belum dikenali)"
 	default:
 		for _, p := range participants {
 			if p.ID != currentUserID {

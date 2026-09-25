@@ -61,9 +61,7 @@ func main() {
 	} else {
 		log.Info("whatsapp cloud api disabled")
 	}
-	if cfg.WhatsApp.BotEnabled {
-		log.Info("whatsapp public bot enabled")
-	}
+	log.Info("whatsapp public bot uses the Chat page toggle")
 
 	router := setupRouter(ctx, cfg, log, pool)
 
@@ -197,10 +195,11 @@ func setupRouter(appCtx context.Context, cfg *config.Config, log *slog.Logger, p
 		financeService,
 		complaintService,
 		botSessionStore,
-		cfg.WhatsApp.BotEnabled,
+		true,
 		log,
 	)
-	waService := whatsapp.NewService(cfg.WhatsApp, waMessenger, chatService, botService, log)
+	waSettings := whatsapp.NewSettingsRepository(pool)
+	waService := whatsapp.NewService(cfg.WhatsApp, waMessenger, chatService, botService, waSettings, log)
 	waHandler := whatsapp.NewHandler(waService, log)
 
 	r := gin.New()

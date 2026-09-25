@@ -11,6 +11,9 @@ type ConversationListProps = {
   onNewChat: () => void
   onNotify?: () => void
   whatsappEnabled?: boolean
+  botEnabled?: boolean
+  botToggling?: boolean
+  onToggleBot?: (enabled: boolean) => void
   loading?: boolean
 }
 
@@ -23,6 +26,9 @@ export function ConversationList({
   onNewChat,
   onNotify,
   whatsappEnabled = false,
+  botEnabled = false,
+  botToggling = false,
+  onToggleBot,
   loading = false,
 }: ConversationListProps) {
   return (
@@ -32,9 +38,50 @@ export function ConversationList({
           <h2 className="text-base font-bold tracking-tight text-[var(--color-ink)]">Chat</h2>
           <p className="text-xs text-[var(--color-muted)]">
             Admin & WhatsApp{whatsappEnabled ? '' : ' · WA off'}
+            {whatsappEnabled ? (botEnabled ? ' · Bot on' : ' · Bot off') : ''}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
+          {onToggleBot ? (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={botEnabled}
+              aria-label={botEnabled ? 'Matikan chatbot WhatsApp' : 'Nyalakan chatbot WhatsApp'}
+              title={
+                !whatsappEnabled
+                  ? 'WhatsApp belum dikonfigurasi'
+                  : botEnabled
+                    ? 'Chatbot sedang nyala. Klik untuk mematikan balasan otomatis.'
+                    : 'Chatbot sedang mati. Klik untuk menyalakan balasan otomatis.'
+              }
+              disabled={botToggling}
+              onClick={() => onToggleBot(!botEnabled)}
+              className={cn(
+                'inline-flex h-10 items-center gap-2 rounded-full border px-3 text-xs font-semibold transition',
+                botEnabled
+                  ? 'border-[#128C7E]/30 bg-[#DCF8C6] text-[#075E54]'
+                  : 'border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-muted)]',
+                'hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50',
+              )}
+            >
+              <span
+                className={cn(
+                  'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition',
+                  botEnabled ? 'bg-[#128C7E]' : 'bg-[var(--color-line)]',
+                )}
+                aria-hidden
+              >
+                <span
+                  className={cn(
+                    'absolute h-3 w-3 rounded-full bg-white shadow transition',
+                    botEnabled ? 'left-3.5' : 'left-0.5',
+                  )}
+                />
+              </span>
+              Chatbot
+            </button>
+          ) : null}
           {onNotify ? (
             <button
               type="button"

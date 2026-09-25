@@ -18,6 +18,7 @@ import {
   useMarkConversationRead,
   useMessages,
   useSendMessage,
+  useUpdateWhatsAppBot,
   useWhatsAppStatus,
 } from '../hooks'
 import type { ConversationFilters, MessageFilters } from '../types'
@@ -33,6 +34,7 @@ export function ChatPage() {
   const [newChatOpen, setNewChatOpen] = useState(false)
   const [notifyOpen, setNotifyOpen] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [botError, setBotError] = useState<string | null>(null)
 
   // Empty search must match chatUnreadFilters so badge + list share one cache entry.
   const conversationFilters = useMemo<ConversationFilters>(() => {
@@ -61,10 +63,12 @@ export function ChatPage() {
   const sendMutation = useSendMessage(conversationId)
   const markReadMutation = useMarkConversationRead()
   const waStatusQuery = useWhatsAppStatus()
+  const updateBotMutation = useUpdateWhatsAppBot()
 
   const conversations = conversationsQuery.data?.items ?? []
   const messages = messagesQuery.data?.items ?? []
   const whatsappEnabled = Boolean(waStatusQuery.data?.enabled)
+  const botEnabled = Boolean(waStatusQuery.data?.bot_enabled)
 
   const activeInboxRow = conversations.find((c) => c.id === conversationId)
   const inboxSyncKey = activeInboxRow
@@ -126,9 +130,18 @@ export function ChatPage() {
   }
 
   const showThreadOnMobile = Boolean(conversationId)
+  async function handleToggleBot(enabled: boolean) {
+    setBotError(null)
+    try {
+      await updateBotMutation.mutateAsync(enabled)
+    } catch (error) {
+      setBotError(toChatErrorMessage(error))
+    }
+  }
+
   const listError = conversationsQuery.isError
     ? toChatErrorMessage(conversationsQuery.error)
-    : null
+    : botError
 
   return (
     <div className="flex h-full min-h-0 flex-1 overflow-hidden rounded-none border-0 bg-[var(--color-panel)] lg:rounded-3xl lg:border lg:border-[var(--color-line)] lg:shadow-sm">
@@ -154,6 +167,11 @@ export function ChatPage() {
           onNewChat={() => setNewChatOpen(true)}
           onNotify={() => setNotifyOpen(true)}
           whatsappEnabled={whatsappEnabled}
+          botEnabled={botEnabled}
+          botToggling={updateBotMutation.isPending}
+          onToggleBot={(enabled) => {
+            void handleToggleBot(enabled)
+          }}
           loading={conversationsQuery.isLoading}
         />
       </aside>

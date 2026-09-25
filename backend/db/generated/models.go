@@ -486,6 +486,12 @@ type ConversationParticipant struct {
 	LastReadAt     pgtype.Timestamptz `json:"last_read_at"`
 }
 
+type DuesFinanceLink struct {
+	DuesPaymentID     pgtype.UUID        `json:"dues_payment_id"`
+	CashTransactionID pgtype.UUID        `json:"cash_transaction_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type DuesPayment struct {
 	ID         pgtype.UUID        `json:"id"`
 	PeriodID   pgtype.UUID        `json:"period_id"`
@@ -578,4 +584,16 @@ type VillageProfile struct {
 	Vision    string             `json:"vision"`
 	Mission   string             `json:"mission"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WhatsappBotSession struct {
+	Phone     string             `json:"phone"`
+	State     string             `json:"state"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WhatsappSetting struct {
+	ID         pgtype.UUID        `json:"id"`
+	BotEnabled bool               `json:"bot_enabled"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
